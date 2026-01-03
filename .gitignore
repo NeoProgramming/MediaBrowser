@@ -1,0 +1,7 @@
+Debug
+Release
+*.log
+*.obj
+*.tlog
+*.pdb
+*.user
