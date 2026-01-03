@@ -7,6 +7,9 @@
 #include <QFileInfo>
 #include <QMutex>
 #include <QWaitCondition>
+#include <QMediaPlayer>
+#include <QVideoProbe>
+//#include <QVideoSink>
 
 class ThumbnailLoader : public QObject
 {
@@ -23,11 +26,24 @@ public slots:
 signals:
 	void thumbnailLoaded(int index, const QPixmap& pixmap);
 	void loadingFinished();
+private slots:
+//	void onVideoFrameAvailable(const QVideoFrame &frame);
 
 private:
 	QPixmap generateThumbnail(const QString& filePath, const QSize& size);
 	QPixmap generateVideoThumbnail(const QString& videoPath, const QSize& size);
+	QPixmap extractFrameFromVideo(const QString& videoPath, const QSize& size);
+	QPixmap createVideoPlaceholder(const QSize& size, const QString& filename);
+	QPixmap addVideoOverlay(const QPixmap& basePixmap, const QSize& size);
 
 	bool abortFlag;
 	QMutex mutex;
+
+	// Для захвата кадров видео
+	QMediaPlayer *mediaPlayer;
+	QVideoProbe *videoProbe;
+	QPixmap lastVideoFrame;
+	QMutex frameMutex;
+	QWaitCondition frameCaptured;
+	bool frameReady;
 };

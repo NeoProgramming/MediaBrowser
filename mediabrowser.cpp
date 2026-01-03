@@ -19,19 +19,6 @@ MediaBrowser::MediaBrowser(QWidget *parent)
 	setupUI();
 	setupMenu();
 	initThumbnailLoader();
-
-//	thumbnailLoader = new ThumbnailLoader();
-//	loaderThread = new QThread();
-//	thumbnailLoader->moveToThread(loaderThread);
-//	connect(loaderThread, &QThread::finished, thumbnailLoader, &QObject::deleteLater);
-//	connect(this, &MediaBrowser::destroyed, this, [this]() {
-//		thumbnailLoader->cancelLoading();
-//		loaderThread->quit();
-//		loaderThread->wait();
-//	});
-//	connect(thumbnailLoader, &ThumbnailLoader::thumbnailLoaded,
-//		this, &MediaBrowser::onThumbnailLoaded);
-//	loaderThread->start();
 }
 
 MediaBrowser::~MediaBrowser()
@@ -187,6 +174,7 @@ void MediaBrowser::onThumbnailLoaded(int index, const QPixmap& pixmap)
 
 bool MediaBrowser::eventFilter(QObject *obj, QEvent *event)
 {
+	// Реализация открытия файла
 	if (event->type() == QEvent::MouseButtonDblClick) {
 		QLabel *label = qobject_cast<QLabel*>(obj);
 		if (label) {
@@ -198,12 +186,29 @@ bool MediaBrowser::eventFilter(QObject *obj, QEvent *event)
 			}
 		}
 	}
-	return QMainWindow::eventFilter(obj, event);
-}
 
-void MediaBrowser::onItemDoubleClicked(const QModelIndex& index)
-{
-	// Реализация открытия файла
+	// Обработка наведения мыши для подсветки
+	if (event->type() == QEvent::Enter) {
+		QLabel *label = qobject_cast<QLabel*>(obj);
+		if (label) {
+			label->setStyleSheet(
+				"border: 2px solid #4CAF50; background: white;"
+				"padding: 5px;"
+			);
+		}
+	}
+
+	if (event->type() == QEvent::Leave) {
+		QLabel *label = qobject_cast<QLabel*>(obj);
+		if (label) {
+			label->setStyleSheet(
+				"border: 1px solid #ddd; background: white;"
+				"padding: 5px;"
+			);
+		}
+	}
+
+	return QMainWindow::eventFilter(obj, event);
 }
 
 void MediaBrowser::closeEvent(QCloseEvent *event)

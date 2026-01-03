@@ -15,7 +15,8 @@
 #include <QtConcurrent>
 #include <QLabel>
 #include "ui_mediabrowser.h"
-#include "ThumbnailLoader.h"
+
+class ThumbnailLoader;
 
 class MediaBrowser : public QMainWindow
 {
@@ -24,14 +25,14 @@ class MediaBrowser : public QMainWindow
 public:
     MediaBrowser(QWidget *parent = Q_NULLPTR);
 	virtual ~MediaBrowser();
+protected:
+	virtual bool eventFilter(QObject *obj, QEvent *event) override;
+	virtual void closeEvent(QCloseEvent *event) override;
 private slots:
 	void selectFolder();
 	void loadThumbnails(const QString& folderPath);
 	void onThumbnailLoaded(int index, const QPixmap& pixmap);
-	void onItemDoubleClicked(const QModelIndex& index);
-
-	virtual bool eventFilter(QObject *obj, QEvent *event) override;
-	virtual void closeEvent(QCloseEvent *event) override;
+	
 private:
 	void setupUI();
 	void setupMenu();
