@@ -14,7 +14,7 @@
 #include <QFuture>
 #include <QtConcurrent>
 #include <QLabel>
-#include "ui_mediabrowser.h"
+#include "Settings.h"
 
 class ThumbnailLoader;
 
@@ -50,6 +50,5 @@ private:
 
 	ThumbnailLoader *thumbnailLoader;
 	QThread *loaderThread;
-private:
-    Ui::MediaBrowserClass ui;
+	Settings cfg;
 };

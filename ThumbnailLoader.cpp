@@ -3,19 +3,20 @@
 #include <QImageReader>
 #include <QPainter>
 #include <QMediaPlayer>
-//#include <QVideoSink>
 #include <QVideoFrame>
 #include <QGuiApplication>
 #include <QElapsedTimer>
 #include <QTimer>
-//#include <QVideoWidget>
 #include <QBuffer>
 #include <QDebug>
+#include <QProcess>
 #include "FFmpegThumbnailer.h"
 
-ThumbnailLoader::ThumbnailLoader(QObject *parent)
+ThumbnailLoader::ThumbnailLoader(const QString &ffmpeg_path, int tn_size, QObject *parent)
 	: QObject(parent)
-	, abortFlag(false)
+	, m_ffmpegPath(ffmpeg_path)
+	, m_thumbnailSize(tn_size)
+	, m_abortFlag(false)
 {
 }
 
@@ -26,27 +27,32 @@ ThumbnailLoader::~ThumbnailLoader()
 
 void ThumbnailLoader::loadThumbnails(const QString& folderPath)
 {
-	abortFlag = false;
+	QMutexLocker locker(&m_mutex);
+	m_abortFlag = false;
+	
+	locker.unlock();
 
 	QDir dir(folderPath);
-	QStringList filters;
-	filters << "*.jpg" << "*.jpeg" << "*.png" << "*.bmp" << "*.gif"
-		<< "*.tiff" << "*.webp" << "*.mp4" << "*.avi" << "*.mkv"
-		<< "*.mov" << "*.wmv";
 
-	QStringList files = dir.entryList(filters, QDir::Files, QDir::Name);
+	// Фильтры для файлов
+	QStringList imageFilters;
+	imageFilters << "*.jpg" << "*.jpeg" << "*.png" << "*.bmp" << "*.gif"
+		<< "*.tiff" << "*.webp" << "*.JPG" << "*.JPEG" << "*.PNG";
 
-	const int thumbnailSize = 200;
-	QSize size(thumbnailSize, thumbnailSize);
+	QStringList videoFilters;
+	videoFilters << "*.mp4" << "*.avi" << "*.mkv" << "*.mov" << "*.wmv"
+		<< "*.flv" << "*.m4v" << "*.mpg" << "*.mpeg" << "*.3gp"
+		<< "*.MP4" << "*.AVI" << "*.MKV" << "*.MOV";
+
+	QStringList allFilters = imageFilters + videoFilters;
+	QStringList files = dir.entryList(allFilters, QDir::Files, QDir::Name);
+		
 
 	for (int i = 0; i < files.size(); ++i) {
-		// Проверяем флаг отмены
+		// Проверяем отмену
 		{
-			QMutexLocker locker(&mutex);
-			if (abortFlag) {
-				qDebug() << "Загрузка отменена";
-				break;
-			}
+			QMutexLocker locker(&m_mutex);
+			if (m_abortFlag) break;
 		}
 
 		QString filePath = dir.absoluteFilePath(files[i]);
@@ -55,429 +61,152 @@ void ThumbnailLoader::loadThumbnails(const QString& folderPath)
 		QFileInfo fileInfo(filePath);
 		QString suffix = fileInfo.suffix().toLower();
 
-		if (suffix == "mp4" || suffix == "avi" || suffix == "mkv" ||
-			suffix == "mov" || suffix == "wmv") {
-			thumbnail = generateVideoThumbnail(filePath, size);
+		// Определяем тип файла
+		bool isVideo = videoFilters.contains("*." + suffix, Qt::CaseInsensitive);
+
+		if (isVideo) {
+			thumbnail = generateVideoThumbnail(filePath, m_thumbnailSize);
 		}
 		else {
-			thumbnail = generateThumbnail(filePath, size);
+			thumbnail = generateImageThumbnail(filePath, m_thumbnailSize);
 		}
 
 		if (!thumbnail.isNull()) {
 			emit thumbnailLoaded(i, thumbnail);
 		}
 
-		// Для предотвращения блокировки UI
-		QThread::msleep(10);
+		// Даем возможность обработать события
+		QThread::msleep(1);
 	}
 
 	emit loadingFinished();
 }
 
-QPixmap ThumbnailLoader::generateThumbnail(const QString& filePath, const QSize& size)
+QPixmap ThumbnailLoader::generateImageThumbnail(const QString& filePath, int size)
 {
-	// Проверяем отмену
-	{
-		QMutexLocker locker(&mutex);
-		if (abortFlag) return QPixmap();
+	QMutexLocker locker(&m_mutex);
+	if (m_abortFlag) return QPixmap();
+	locker.unlock();
+
+	QImageReader reader(filePath);
+	if (!reader.canRead()) {
+		return QPixmap();
 	}
 
-	QImage image(filePath);
+	reader.setAutoTransform(true); // Автоповорот по EXIF
+
+	// Читаем с уменьшением для скорости
+	QSize imageSize = reader.size();
+	if (imageSize.width() > 800 || imageSize.height() > 800) {
+		imageSize.scale(800, 800, Qt::KeepAspectRatio);
+		reader.setScaledSize(imageSize);
+	}
+
+	QImage image = reader.read();
 	if (image.isNull()) {
 		return QPixmap();
 	}
 
-	QImage scaled = image.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-	// Создаем превью с рамкой
-	QPixmap pixmap(size);
-	pixmap.fill(Qt::white);
-
-	QPainter painter(&pixmap);
-	painter.setRenderHint(QPainter::Antialiasing);
-
-	// Центрируем изображение
-	int x = (size.width() - scaled.width()) / 2;
-	int y = (size.height() - scaled.height()) / 2;
-
-	painter.drawImage(x, y, scaled);
-
-	// Рисуем рамку
-	painter.setPen(QPen(Qt::lightGray, 1));
-	painter.drawRect(0, 0, size.width() - 1, size.height() - 1);
-
-	return pixmap;
+	QImage scaled = image.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+	return QPixmap::fromImage(scaled);
 }
 
-QPixmap ThumbnailLoader::generateVideoThumbnail(const QString& videoPath, const QSize& size)
+QPixmap ThumbnailLoader::generateVideoThumbnail(const QString& filePath, int size)
 {
-	// Проверяем отмену
-	{
-		QMutexLocker locker(&mutex);
-		if (abortFlag) return QPixmap();
-	}
+	QMutexLocker locker(&m_mutex);
+	if (m_abortFlag) return QPixmap();
+	locker.unlock();
 
-	qDebug() << "Генерация превью для видео:" << videoPath;
+	QPixmap thumbnail = extractFrameWithFFmpeg(filePath, size);
 
-	// Пробуем FFmpeg сначала (если доступен)
-	if (FFmpegThumbnailer::isAvailable()) {
-		QPixmap thumbnail = FFmpegThumbnailer::generateThumbnail(videoPath, size);
-		if (!thumbnail.isNull()) {
-			return addVideoOverlay(thumbnail, size);
-		}	
-	}
-
-	// Пробуем несколько методов
-	QPixmap thumbnail;
-
-	// Метод 1: Используем QMediaPlayer для захвата кадра
-	thumbnail = extractFrameFromVideo(videoPath, size);
-
-	// Метод 2: Если не получилось, создаем заглушку
+	// Если не получилось, создаем заглушку
 	if (thumbnail.isNull()) {
-		thumbnail = createVideoPlaceholder(size, QFileInfo(videoPath).fileName());
+		thumbnail = QPixmap(size, size);
+		thumbnail.fill(QColor(50, 50, 60));
+
+		QPainter painter(&thumbnail);
+		painter.setRenderHint(QPainter::Antialiasing);
+
+		// Иконка видео
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(QColor(100, 150, 220));
+
+		QPolygonF triangle;
+		triangle << QPointF(size * 0.3, size * 0.2)
+			<< QPointF(size * 0.3, size * 0.8)
+			<< QPointF(size * 0.7, size * 0.5);
+
+		painter.drawPolygon(triangle);
+
+		painter.setPen(Qt::white);
+		painter.setFont(QFont("Arial", 10));
+		painter.drawText(thumbnail.rect(), Qt::AlignBottom | Qt::AlignHCenter,
+			QFileInfo(filePath).suffix().toUpper());
 	}
 
 	return thumbnail;
-/*
-	// Для видео можно использовать QMediaPlayer для получения кадра
-	// В реальном приложении может потребоваться FFmpeg
-	QPixmap pixmap(size);
-	pixmap.fill(Qt::darkGray);
-
-	QPainter painter(&pixmap);
-	painter.setRenderHint(QPainter::Antialiasing);
-
-	// Рисуем иконку видео
-	painter.setPen(Qt::white);
-	painter.setFont(QFont("Arial", 12));
-	painter.drawText(pixmap.rect(), Qt::AlignCenter, "VIDEO");
-
-	// Рисуем рамку
-	painter.setPen(QPen(Qt::lightGray, 1));
-	painter.drawRect(0, 0, size.width() - 1, size.height() - 1);
-
-	return pixmap;*/
 }
 
-QPixmap ThumbnailLoader::extractFrameFromVideo(const QString& videoPath, const QSize& size)
+QPixmap ThumbnailLoader::extractFrameWithFFmpeg(const QString& videoPath, int size)
 {
-	// Создаем локальные объекты для захвата кадра
-	QMediaPlayer *player = new QMediaPlayer();
-	QVideoProbe *probe = new QVideoProbe();
-	QEventLoop loop;
-	QTimer timeoutTimer;
+	QProcess ffmpeg;
+	QByteArray outputData;
 
-	QPixmap result;
-	bool frameCaptured = false;
-
-	// Настраиваем таймаут
-	timeoutTimer.setSingleShot(true);
-	timeoutTimer.start(5000); // 5 секунд таймаут
-
-	// Подключаем probe к player
-	if (!probe->setSource(player)) {
-		qDebug() << "Не удалось подключить VideoProbe";
-		delete probe;
-		delete player;
-		return result;
+	// Проверяем существование ffmpeg
+	QFileInfo ffmpegInfo(m_ffmpegPath);
+	if (!ffmpegInfo.exists() || !ffmpegInfo.isFile()) {
+		emit errorOccurred(QString("FFmpeg not found: %1").arg(m_ffmpegPath));
+		return QPixmap();
 	}
 
-	// Слот для захвата кадра
-	auto frameHandler = [&](const QVideoFrame &frame) {
-		if (frame.isValid() && !frameCaptured) {
-			QVideoFrame cloneFrame(frame);
-			if (cloneFrame.map(QAbstractVideoBuffer::ReadOnly)) {
-				QImage image;
+	QStringList args;
+	args << "-i" << videoPath
+		<< "-ss" << "1"                     // 1 секунда от начала
+		<< "-vframes" << "1"                // Только один кадр
+		<< "-vf" << QString("scale=%1:%2:force_original_aspect_ratio=decrease")
+		.arg(size).arg(size)
+		<< "-f" << "image2pipe"            // Вывод в pipe
+		<< "-c:v" << "png"                 // Используем PNG
+		<< "-" << "-y";                    // "-" означает вывод в stdout
 
-				// Конвертируем видеофрейм в QImage
-				QVideoFrame::PixelFormat pixelFormat = cloneFrame.pixelFormat();
+	ffmpeg.start(m_ffmpegPath, args);
 
-				if (pixelFormat == QVideoFrame::Format_ARGB32 ||
-					pixelFormat == QVideoFrame::Format_RGB32) {
-					image = QImage(cloneFrame.bits(),
-						cloneFrame.width(),
-						cloneFrame.height(),
-						cloneFrame.bytesPerLine(),
-						QImage::Format_ARGB32);
-				}
-				else if (pixelFormat == QVideoFrame::Format_RGB24) {
-					image = QImage(cloneFrame.bits(),
-						cloneFrame.width(),
-						cloneFrame.height(),
-						cloneFrame.bytesPerLine(),
-						QImage::Format_RGB888);
-				}
-				else if (pixelFormat == QVideoFrame::Format_YUYV) {
-					// Конвертируем YUYV в RGB
-					image = QImage(cloneFrame.width(), cloneFrame.height(), QImage::Format_RGB32);
-					const uchar *bits = cloneFrame.bits();
-					for (int y = 0; y < cloneFrame.height(); ++y) {
-						QRgb *scanline = (QRgb*)image.scanLine(y);
-						for (int x = 0; x < cloneFrame.width(); x += 2) {
-							int y0 = bits[0];
-							int u = bits[1];
-							int y1 = bits[2];
-							int v = bits[3];
-							bits += 4;
-
-							// Конвертация YUV в RGB (упрощенная)
-							int c = y0 - 16;
-							int d = u - 128;
-							int e = v - 128;
-
-							int r = qBound(0, (298 * c + 409 * e + 128) >> 8, 255);
-							int g = qBound(0, (298 * c - 100 * d - 208 * e + 128) >> 8, 255);
-							int b = qBound(0, (298 * c + 516 * d + 128) >> 8, 255);
-
-							scanline[x] = qRgb(r, g, b);
-
-							c = y1 - 16;
-							r = qBound(0, (298 * c + 409 * e + 128) >> 8, 255);
-							g = qBound(0, (298 * c - 100 * d - 208 * e + 128) >> 8, 255);
-							b = qBound(0, (298 * c + 516 * d + 128) >> 8, 255);
-
-							scanline[x + 1] = qRgb(r, g, b);
-						}
-					}
-				}
-
-				cloneFrame.unmap();
-
-				if (!image.isNull()) {
-					// Масштабируем и создаем превью
-					QImage scaled = image.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-					result = QPixmap::fromImage(scaled);
-					frameCaptured = true;
-
-					// Добавляем индикатор видео
-					if (!result.isNull()) {
-						QPainter painter(&result);
-						painter.setRenderHint(QPainter::Antialiasing);
-
-						// Полупрозрачный черный фон для индикатора
-						painter.fillRect(0, 0, result.width(), 25, QColor(0, 0, 0, 180));
-
-						// Иконка воспроизведения
-						painter.setPen(Qt::white);
-						painter.setBrush(Qt::white);
-
-						QPolygonF triangle;
-						triangle << QPointF(10, 7)
-							<< QPointF(10, 18)
-							<< QPointF(20, 12.5);
-						painter.drawPolygon(triangle);
-
-						// Текст
-						painter.setFont(QFont("Arial", 9));
-						painter.drawText(QRect(30, 0, result.width() - 30, 25),
-							Qt::AlignLeft | Qt::AlignVCenter, "Видео");
-
-						// Продолжительность (если можем получить)
-						QFileInfo info(videoPath);
-						painter.setFont(QFont("Arial", 8));
-						painter.drawText(QRect(0, result.height() - 20, result.width(), 20),
-							Qt::AlignRight | Qt::AlignBottom,
-							info.suffix().toUpper());
-					}
-				}
-			}
-
-			// Выходим из event loop
-			if (frameCaptured) {
-				loop.quit();
-			}
-		}
-	};
-
-	// Подключаем обработчик кадров
-	QObject::connect(probe, &QVideoProbe::videoFrameProbed, frameHandler);
-
-	// Обработка ошибок
-	QObject::connect(player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error),
-		[&](QMediaPlayer::Error error) {
-		qDebug() << "Ошибка MediaPlayer:" << error << player->errorString();
-		if (!frameCaptured) {
-			loop.quit();
-		}
-	});
-
-	// Обработка таймаута
-	QObject::connect(&timeoutTimer, &QTimer::timeout, &loop, &QEventLoop::quit);
-
-	// Обработка загрузки медиа
-	QObject::connect(player, &QMediaPlayer::mediaStatusChanged,
-		[&](QMediaPlayer::MediaStatus status) {
-		if (status == QMediaPlayer::LoadedMedia ||
-			status == QMediaPlayer::BufferedMedia) {
-			// Пытаемся получить кадр в позиции 1 секунда
-			player->setPosition(1000);
-		}
-		else if (status == QMediaPlayer::InvalidMedia) {
-			qDebug() << "Неверный медиафайл";
-			loop.quit();
-		}
-	});
-
-	// Устанавливаем видео и запускаем
-	player->setMedia(QUrl::fromLocalFile(videoPath));
-	player->setVideoOutput((QVideoWidget*)nullptr); // Без видеовыхода
-
-	// Запускаем event loop
-	loop.exec();
-
-	// Останавливаем и очищаем
-	player->stop();
-	player->deleteLater();
-	probe->deleteLater();
-
-	// Если не удалось захватить кадр, создаем заглушку
-	if (result.isNull()) {
-		qDebug() << "Не удалось захватить кадр из видео:" << videoPath;
+	if (!ffmpeg.waitForStarted(2000)) {
+		emit errorOccurred("Failed to start FFmpeg");
+		return QPixmap();
 	}
 
-	return result;
-}
-
-// Вспомогательная функция для создания заглушки видео
-QPixmap ThumbnailLoader::createVideoPlaceholder(const QSize& size, const QString& filename)
-{
-	QPixmap pixmap(size);
-	pixmap.fill(QColor(50, 50, 60));
-
-	QPainter painter(&pixmap);
-	painter.setRenderHint(QPainter::Antialiasing);
-
-	// Градиентный фон
-	QLinearGradient gradient(0, 0, 0, size.height());
-	gradient.setColorAt(0, QColor(70, 70, 80));
-	gradient.setColorAt(1, QColor(40, 40, 50));
-	painter.fillRect(pixmap.rect(), gradient);
-
-	// Иконка видео
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(100, 150, 220));
-
-	// Большая иконка воспроизведения
-	int iconSize = qMin(size.width(), size.height()) / 3;
-	QRect iconRect((size.width() - iconSize) / 2,
-		(size.height() - iconSize) / 2 - 10,
-		iconSize, iconSize);
-
-	QPolygonF triangle;
-	triangle << QPointF(iconRect.left() + iconSize * 0.3, iconRect.top() + iconSize * 0.2)
-		<< QPointF(iconRect.left() + iconSize * 0.3, iconRect.bottom() - iconSize * 0.2)
-		<< QPointF(iconRect.right() - iconSize * 0.3, iconRect.top() + iconSize * 0.5);
-
-	painter.drawPolygon(triangle);
-
-	// Название файла
-	QString displayName = filename;
-	if (displayName.length() > 20) {
-		displayName = displayName.left(17) + "...";
+	// Читаем все данные
+	if (!ffmpeg.waitForFinished(5000)) {
+		ffmpeg.kill();
+		emit errorOccurred("FFmpeg timeout");
+		return QPixmap();
 	}
 
-	painter.setPen(Qt::white);
-	painter.setFont(QFont("Arial", 10, QFont::Bold));
+	if (ffmpeg.exitCode() != 0) {
+		QString error = ffmpeg.readAllStandardError();
+		emit errorOccurred(QString("FFmpeg error: %1").arg(error));
+		return QPixmap();
+	}
 
-	QRect textRect(0, size.height() - 40, size.width(), 40);
-	painter.drawText(textRect, Qt::AlignCenter, displayName);
+	outputData = ffmpeg.readAllStandardOutput();
 
-	// Информация о формате
-	painter.setFont(QFont("Arial", 8));
-	painter.setPen(QColor(180, 180, 180));
+	if (outputData.isEmpty()) {
+		emit errorOccurred("FFmpeg returned no data.");
+		return QPixmap();
+	}
 
-	QString ext = QFileInfo(filename).suffix().toUpper();
-	painter.drawText(QRect(0, size.height() - 20, size.width(), 20),
-		Qt::AlignCenter, ext + " Video");
-
-	// Рамка
-	painter.setPen(QPen(QColor(100, 100, 120), 2));
-	painter.setBrush(Qt::NoBrush);
-	painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
+	QPixmap pixmap;
+	if (!pixmap.loadFromData(outputData, "PNG")) {
+		emit errorOccurred("Failed to load image from FFmpeg data");
+		return QPixmap();
+	}
 
 	return pixmap;
 }
 
-
 void ThumbnailLoader::cancelLoading()
 {
-	QMutexLocker locker(&mutex);
-	abortFlag = true;
-}
-
-// Функция для добавления оверлея видео на превью
-QPixmap ThumbnailLoader::addVideoOverlay(const QPixmap& basePixmap, const QSize& size)
-{
-	if (basePixmap.isNull()) {
-		return basePixmap;
-	}
-
-	QPixmap result = basePixmap.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-	// Если изображение меньше нужного размера, центрируем его
-	if (result.width() < size.width() || result.height() < size.height()) {
-		QPixmap centered(size);
-		centered.fill(Qt::black); // Черный фон
-
-		QPainter painter(&centered);
-		painter.setRenderHint(QPainter::Antialiasing);
-
-		// Центрируем изображение
-		int x = (size.width() - result.width()) / 2;
-		int y = (size.height() - result.height()) / 2;
-		painter.drawPixmap(x, y, result);
-
-		result = centered;
-	}
-
-	// Добавляем оверлей с информацией о видео
-	QPainter painter(&result);
-	painter.setRenderHint(QPainter::Antialiasing);
-
-	// 1. Индикатор в верхнем левом углу
-	QRect infoRect(5, 5, result.width() / 3, 25);
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(0, 0, 0, 180)); // Полупрозрачный черный
-	painter.drawRoundedRect(infoRect, 5, 5);
-
-	// Иконка воспроизведения
-	painter.setPen(Qt::white);
-	painter.setBrush(Qt::white);
-
-	QPolygonF triangle;
-	triangle << QPointF(infoRect.left() + 7, infoRect.top() + 8)
-		<< QPointF(infoRect.left() + 7, infoRect.bottom() - 8)
-		<< QPointF(infoRect.left() + 17, infoRect.top() + infoRect.height() / 2);
-	painter.drawPolygon(triangle);
-
-	// Текст "VIDEO"
-	painter.setFont(QFont("Arial", 9, QFont::Bold));
-	painter.drawText(QRect(infoRect.left() + 22, infoRect.top(),
-		infoRect.width() - 22, infoRect.height()),
-		Qt::AlignLeft | Qt::AlignVCenter, "VIDEO");
-
-	// 2. Полоска времени внизу (опционально)
-	QRect timeRect(0, result.height() - 4, result.width(), 4);
-	painter.setPen(Qt::NoPen);
-	painter.setBrush(QColor(70, 130, 220, 200));
-	painter.drawRect(timeRect);
-
-	// 3. Индикатор длительности в правом нижнем углу (если известна длительность)
-	// Для простоты показываем иконку камеры
-	QRect durationRect(result.width() - 35, result.height() - 30, 30, 25);
-	painter.setBrush(QColor(0, 0, 0, 150));
-	painter.drawRoundedRect(durationRect, 3, 3);
-
-	// Иконка камеры
-	painter.setPen(QPen(Qt::white, 1));
-	painter.setBrush(Qt::NoBrush);
-
-	// Объектив камеры
-	painter.drawEllipse(QPoint(durationRect.center().x(), durationRect.center().y() - 2), 6, 6);
-
-	// Корпус камеры
-	painter.drawRect(durationRect.left() + 8, durationRect.top() + 5, 14, 8);
-
-	return result;
+	QMutexLocker locker(&m_mutex);
+	m_abortFlag = true;
 }

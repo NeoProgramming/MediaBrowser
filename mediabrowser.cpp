@@ -15,7 +15,7 @@
 MediaBrowser::MediaBrowser(QWidget *parent)
     : QMainWindow(parent)
 {
-    //ui.setupUi(this);
+	cfg.loadSettings();
 	setupUI();
 	setupMenu();
 	initThumbnailLoader();
@@ -36,7 +36,7 @@ MediaBrowser::~MediaBrowser()
 
 void MediaBrowser::initThumbnailLoader()
 {
-	thumbnailLoader = new ThumbnailLoader();
+	thumbnailLoader = new ThumbnailLoader(cfg.m_ffmpegPath, cfg.m_thumbnailSize);
 	loaderThread = new QThread(this); // ”казываем parent дл€ автоматического удалени€
 
 	thumbnailLoader->moveToThread(loaderThread);

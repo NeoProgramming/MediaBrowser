@@ -86,9 +86,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FFmpegThumbnailer.cpp" />
+    <ClCompile Include="Settings.cpp" />
     <ClCompile Include="ThumbnailLoader.cpp" />
     <QtRcc Include="mediabrowser.qrc" />
-    <QtUic Include="mediabrowser.ui" />
     <QtMoc Include="mediabrowser.h" />
     <ClCompile Include="mediabrowser.cpp" />
     <ClCompile Include="main.cpp" />
@@ -98,6 +98,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FFmpegThumbnailer.h" />
+    <ClInclude Include="Settings.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

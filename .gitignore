@@ -5,3 +5,8 @@ Release
 *.tlog
 *.pdb
 *.user
+*.ipch
+*.suo
+*.db
+*.txt
+*.ini
