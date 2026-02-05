@@ -5,12 +5,14 @@
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QDir>
 #include <QFileInfo>
 #include <QDesktopServices>
 #include <QMessageBox>
+#include <QGroupBox>
 
 MediaBrowser::MediaBrowser(QWidget *parent)
     : QMainWindow(parent)
@@ -19,10 +21,13 @@ MediaBrowser::MediaBrowser(QWidget *parent)
 	setupUI();
 	setupMenu();
 	initThumbnailLoader();
+
+	QTimer::singleShot(100, this, &MediaBrowser::loadNextUnprocessedDir);
 }
 
 MediaBrowser::~MediaBrowser()
 {
+	cfg.saveSettings();
 	// Отменяем загрузку и завершаем поток ПЕРЕД удалением
 	if (thumbnailLoader && loaderThread) {
 		thumbnailLoader->cancelLoading();
@@ -34,9 +39,14 @@ MediaBrowser::~MediaBrowser()
 	// thumbnailLoader удалится автоматически через parent или thread
 }
 
+void MediaBrowser::loadNextUnprocessedDir()
+{
+
+}
+
 void MediaBrowser::initThumbnailLoader()
 {
-	thumbnailLoader = new ThumbnailLoader(cfg.m_ffmpegPath, cfg.m_thumbnailSize);
+	thumbnailLoader = new ThumbnailLoader(cfg.ffmpegPath, cfg.thumbnailSize);
 	loaderThread = new QThread(this); // Указываем parent для автоматического удаления
 
 	thumbnailLoader->moveToThread(loaderThread);
@@ -61,7 +71,49 @@ void MediaBrowser::setupUI()
 	centralWidget = new QWidget(this);
 	setCentralWidget(centralWidget);
 
-	scrollArea = new QScrollArea(centralWidget);
+	// Основной горизонтальный layout
+	QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+
+	// Левая панель - дерево целевых папок
+	QGroupBox *targetGroup = new QGroupBox("Целевые папки");
+	QVBoxLayout *targetLayout = new QVBoxLayout(targetGroup);
+
+	targetTree = new QTreeWidget();
+	targetTree->setHeaderLabel("Категории");
+	targetLayout->addWidget(targetTree);
+
+	// Поле для выбора целевой папки
+	QHBoxLayout *targetPathLayout = new QHBoxLayout();
+	targetPathLayout->addWidget(new QLabel("Целевая:"));
+	targetPathEdit = new QLineEdit();
+	targetPathEdit->setReadOnly(true);
+	targetPathLayout->addWidget(targetPathEdit);
+	QPushButton *targetBrowseBtn = new QPushButton("...");
+	targetBrowseBtn->setFixedWidth(30);
+	connect(targetBrowseBtn, &QPushButton::clicked,	this, &MediaBrowser::selectTargetFolder);
+	targetPathLayout->addWidget(targetBrowseBtn);
+	targetLayout->addLayout(targetPathLayout);
+
+	// Правая панель - превью
+	QWidget *rightPanel = new QWidget();
+	QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
+
+	// Панель с исходной папкой
+	QHBoxLayout *sourceLayout = new QHBoxLayout();
+	sourceLayout->addWidget(new QLabel("Исходная:"));
+	sourcePathEdit = new QLineEdit();
+	sourcePathEdit->setReadOnly(true);
+	sourceLayout->addWidget(sourcePathEdit);
+	QPushButton *sourceBrowseBtn = new QPushButton("...");
+	sourceBrowseBtn->setFixedWidth(30);
+	connect(sourceBrowseBtn, &QPushButton::clicked,
+		this, &MediaBrowser::selectSourceFolder);
+	sourceLayout->addWidget(sourceBrowseBtn);
+
+	rightLayout->addLayout(sourceLayout);
+
+	// Область превью с прокруткой
+	scrollArea = new QScrollArea();// centralWidget);
 	scrollArea->setWidgetResizable(true);
 	scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 	scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -73,9 +125,28 @@ void MediaBrowser::setupUI()
 
 	scrollArea->setWidget(thumbnailContainer);
 
-	QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
-	mainLayout->addWidget(scrollArea);
-	mainLayout->setContentsMargins(0, 0, 0, 0);
+	rightLayout->addWidget(scrollArea);
+
+	// Кнопка перемещения
+	moveButton = new QPushButton("Переместить папку (Ctrl+M)");
+	moveButton->setMinimumHeight(40);
+	moveButton->setEnabled(false);
+	connect(moveButton, &QPushButton::clicked, this, &MediaBrowser::moveCurrentFolder);
+	rightLayout->addWidget(moveButton);
+
+	// Статус FFmpeg
+	ffmpegStatusLabel = new QLabel();
+	ffmpegStatusLabel->setStyleSheet("color: red;");
+	rightLayout->addWidget(ffmpegStatusLabel);
+
+	// Добавляем панели в основной layout
+	mainLayout->addWidget(targetGroup, 1); // Левая панель - 1 часть
+	mainLayout->addWidget(rightPanel, 3);  // Правая панель - 3 части
+
+
+	
+//	mainLayout->addWidget(scrollArea);
+//	mainLayout->setContentsMargins(0, 0, 0, 0);
 }
 
 void MediaBrowser::setupMenu()
@@ -104,6 +175,38 @@ void MediaBrowser::selectFolder()
 	}
 }
 
+
+void MediaBrowser::selectSourceFolder()
+{
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Выберите исходную папку",
+		cfg.sourceFolder
+	);
+
+	if (!folder.isEmpty()) {
+		cfg.sourceFolder = folder;
+		cfg.saveSettings();
+	//	updateSettingsUI();
+		loadFolder(folder);
+	}
+}
+
+void MediaBrowser::selectTargetFolder()
+{
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Выберите целевую папку",
+		cfg.targetFolder
+	);
+
+	if (!folder.isEmpty()) {
+		cfg.targetFolder = folder;
+		cfg.saveSettings();
+	//	updateSettingsUI();
+	}
+}
+
 void MediaBrowser::loadThumbnails(const QString& folderPath)
 {
 	// Очищаем старые превью
@@ -111,7 +214,7 @@ void MediaBrowser::loadThumbnails(const QString& folderPath)
 	thumbnailLabels.clear();
 	currentFiles.clear();
 
-	currentFolder = folderPath;
+	cfg.sourceFolder = folderPath;
 	setWindowTitle("View - " + QFileInfo(folderPath).fileName());
 
 	// Получаем список файлов
@@ -151,6 +254,26 @@ void MediaBrowser::loadThumbnails(const QString& folderPath)
 		Q_ARG(QString, folderPath));
 }
 
+void MediaBrowser::clearThumbnails()
+{
+	// Удаляем все превью
+	for (QLabel *label : thumbnailLabels) {
+		thumbnailLayout->removeWidget(label);
+		delete label;
+	}
+	thumbnailLabels.clear();
+	currentFiles.clear();
+
+	// Очищаем layout
+	while (thumbnailLayout->count() > 0) {
+		QLayoutItem *item = thumbnailLayout->takeAt(0);
+		if (item->widget()) {
+			delete item->widget();
+		}
+		delete item;
+	}
+}
+
 void MediaBrowser::onThumbnailLoaded(int index, const QPixmap& pixmap)
 {
 	if (index >= 0 && index < thumbnailLabels.size()) {
@@ -172,6 +295,11 @@ void MediaBrowser::onThumbnailLoaded(int index, const QPixmap& pixmap)
 	}
 }
 
+void MediaBrowser::onThumbnailsFinished()
+{
+	statusBar()->showMessage("Загрузка завершена", 3000);
+}
+
 bool MediaBrowser::eventFilter(QObject *obj, QEvent *event)
 {
 	// Реализация открытия файла
@@ -180,7 +308,7 @@ bool MediaBrowser::eventFilter(QObject *obj, QEvent *event)
 		if (label) {
 			int index = label->property("fileIndex").toInt();
 			if (index >= 0 && index < currentFiles.size()) {
-				QString filePath = currentFolder + "/" + currentFiles[index];
+				QString filePath = cfg.sourceFolder + "/" + currentFiles[index];
 				QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
 				return true;
 			}
@@ -219,4 +347,80 @@ void MediaBrowser::closeEvent(QCloseEvent *event)
 	}
 
 	QMainWindow::closeEvent(event);
+}
+
+QString MediaBrowser::findNextUnprocessedDir()
+{
+	if (cfg.sourceFolder.isEmpty()) return QString();
+
+	// Ищем ЛЮБую папку файл в папке
+	QDirIterator it(cfg.sourceFolder,
+		QStringList() << "*.*",
+		QDir::Dirs,
+		QDirIterator::NoIteratorFlags);
+
+	if (it.hasNext()) {
+		return it.next();
+	}
+
+	return QString(); // папок не найдено
+}
+
+void MediaBrowser::moveCurrentFolder()
+{
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Ошибка", "Нет текущей папки для перемещения");
+		return;
+	}
+
+	if (cfg.targetFolder.isEmpty() || !QDir(cfg.targetFolder).exists()) {
+		QMessageBox::warning(this, "Ошибка", "Целевая папка не выбрана или не существует");
+		return;
+	}
+
+	// Получаем имя папки
+	QString folderName = QFileInfo(currentFolder).fileName();
+	QString targetPath = QDir(cfg.targetFolder).absoluteFilePath(folderName);
+
+	// Проверяем, не существует ли уже такая папка
+	if (QDir(targetPath).exists()) {
+		int result = QMessageBox::question(this, "Подтверждение",
+			QString("Папка '%1' уже существует в целевой директории.\nПерезаписать?")
+			.arg(folderName),
+			QMessageBox::Yes | QMessageBox::No);
+
+		if (result == QMessageBox::No) {
+			return;
+		}
+	}
+
+	// Перемещаем папку
+	QDir dir;
+	if (!dir.rename(currentFolder, targetPath)) {
+		QMessageBox::critical(this, "Ошибка",
+			QString("Не удалось переместить папку '%1' в '%2'")
+			.arg(currentFolder).arg(targetPath));
+		return;
+	}
+
+	statusBar()->showMessage(QString("Папка перемещена в %1").arg(targetPath), 5000);
+
+	// Очищаем и загружаем следующую папку
+	clearThumbnails();
+	moveButton->setEnabled(false);
+
+	// Ищем следующую папку в исходной директории
+	QDir sourceDir(cfg.sourceFolder);
+	QStringList subdirs = sourceDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+
+	if (!subdirs.isEmpty()) {
+		QString nextFolder = QDir(cfg.sourceFolder).absoluteFilePath(subdirs.first());
+		loadFolder(nextFolder);
+	}
+	else {
+		currentFolder.clear();
+		sourcePathEdit->clear();
+		QMessageBox::information(this, "Завершено",
+			"Все папки в исходной директории обработаны.");
+	}
 }

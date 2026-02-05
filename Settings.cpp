@@ -4,12 +4,12 @@
 static const char INI_FILE[] = "mediabrowser.ini";
 
 #define SETTINGS_LIST	\
-	X(m_ffmpegPath,			"ffmpeg", "ffmpeg.exe")	\
-	X(m_tagsPath,			"tags",	  "tags.txt")	\
-	X(m_lastSourceFolder,	"source", ".")	\
-	X(m_lastTargetFolder,	"target", ".")	\
-	X(m_thumbnailSize,		"size",   "200")\
-	X(m_thumbnailColumns,	"columns","4")
+	X(ffmpegPath,		"ffmpeg", "ffmpeg.exe")	\
+	X(tagsPath,			"tags",	  "tags.txt")	\
+	X(sourceFolder,		"source", ".")	\
+	X(targetFolder,		"target", ".")	\
+	X(thumbnailSize,	"size",   "200")\
+	X(thumbnailColumns,	"columns","4")
 
 // Qt does not QVariant.getValue() method
 template<typename T>
