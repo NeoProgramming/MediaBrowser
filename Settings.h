@@ -8,8 +8,8 @@ struct Settings
 
 	QString ffmpegPath;
 	QString tagsPath;
-	QString sourceFolder;
-	QString targetFolder;
+	QString sourceRoot;
+	QString targetRoot;
 	int thumbnailSize;
 	int thumbnailColumns;
 };

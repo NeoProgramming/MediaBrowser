@@ -31,41 +31,50 @@ protected:
 	virtual bool eventFilter(QObject *obj, QEvent *event) override;
 	virtual void closeEvent(QCloseEvent *event) override;
 private slots:
-	void selectFolder();
-	void selectSourceFolder();
-	void selectTargetFolder();
-	void loadThumbnails(const QString& folderPath);
+	
+	void onSelectSourceRoot();
+	void onSelectTargetRoot();	
 	void onThumbnailLoaded(int index, const QPixmap& pixmap);
 	void onThumbnailsFinished();
-	void loadNextUnprocessedDir();
+
 private:
-	void setupUI();
-	void setupMenu();
-	void initThumbnailLoader();
+	void initPreviewArea();
+	void initSidebar();
+	void initMenu();
+
 	void clearThumbnails();
 	void moveCurrentFolder();
 	QString findNextUnprocessedDir();
+	void loadNextUnprocessedFolder();
 
-	// UI элементы
-	QWidget *centralWidget;
-	QScrollArea *scrollArea;
-	QWidget *thumbnailContainer;
-	QGridLayout *thumbnailLayout;
-	QTreeWidget *targetTree;
-	QLineEdit *sourcePathEdit;
-	QLineEdit *targetPathEdit;
-	QPushButton *moveButton;
-	QLabel *statusLabel;
-	QLabel *ffmpegStatusLabel;
-	QVector<QLabel*> thumbnailLabels;
-	
-	// Данные
-	QString currentFolder;
-	QVector<QString> currentFiles;
+	void loadFolderThumbnails(const QString& folderPath);
+
+	void updateSourceLabel();
+	void updateTargetLabel();
+
+	// Настройки
 	Settings cfg;
-	QStringList m_pendingFolders;
 
-	// Загрузчик превью
+	// UI элементы боковой панели (докинг)
+	QLabel *labSrc;                 // Папка-источник сортируемого контента
+	QLabel *labDst;                 // Корневая папка для дерева категорий
+	QDockWidget *sidebarDock;       // Докинг-панель
+	QTreeView *categoryTree;        // Визуальное дерево папок-категорий
+	QFileSystemModel *categoriesModel; // Модель файловой системы для дерева категорий
+	QPushButton *moveButton;        // Кнопка "MOVE"
+	QPushButton *newCategoryButton; // Кнопка "New theme"
+
+	// UI элементы основной области (превью)
+	QScrollArea *previewScrollArea; // Область с прокруткой для превью
+	QWidget *previewContainer;      // Контейнер для миниатюр
+	QGridLayout *previewLayout;     // Layout для размещения миниатюр
+
+	// Данные текущей папки
+	QString currentFolder;          // Текущая просматриваемая папка
+	QVector<QString> currentFiles;  // Файлы в текущей папке
+	QVector<QLabel*> thumbnailLabels; // Ярлыки для превью
+
+	 // Загрузчик превью
 	ThumbnailLoader *thumbnailLoader;
 	QThread *loaderThread;
 };

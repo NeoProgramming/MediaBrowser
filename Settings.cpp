@@ -6,8 +6,8 @@ static const char INI_FILE[] = "mediabrowser.ini";
 #define SETTINGS_LIST	\
 	X(ffmpegPath,		"ffmpeg", "ffmpeg.exe")	\
 	X(tagsPath,			"tags",	  "tags.txt")	\
-	X(sourceFolder,		"source", ".")	\
-	X(targetFolder,		"target", ".")	\
+	X(sourceRoot,		"source", ".")	\
+	X(targetRoot,		"target", ".")	\
 	X(thumbnailSize,	"size",   "200")\
 	X(thumbnailColumns,	"columns","4")
 

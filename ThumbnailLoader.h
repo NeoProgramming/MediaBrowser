@@ -36,21 +36,8 @@ private:
 	QPixmap generateVideoThumbnail(const QString& videoPath, int size);
 	QPixmap extractFrameWithFFmpeg(const QString& videoPath, int size);
 
-//	QPixmap createVideoPlaceholder(const QSize& size, const QString& filename);
-//	QPixmap addVideoOverlay(const QPixmap& basePixmap, const QSize& size);
-
-
 	bool m_abortFlag;
 	QMutex m_mutex;
 	QString m_ffmpegPath;
-	int m_thumbnailSize = 200; // Размер превью
-
-//	bool abortFlag;
-//	QMutex mutex;
-//	QMediaPlayer *mediaPlayer;
-//	QVideoProbe *videoProbe;
-//	QPixmap lastVideoFrame;
-//	QMutex frameMutex;
-//	QWaitCondition frameCaptured;
-//	bool frameReady;
+	int m_thumbnailSize = 200; 
 };
