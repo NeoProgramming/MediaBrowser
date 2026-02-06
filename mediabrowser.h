@@ -17,6 +17,7 @@
 #include <QTreeWidget>
 #include <QPushButton>
 #include "Settings.h"
+#include "ThumbnailWidget.h"
 
 class ThumbnailLoader;
 
@@ -28,14 +29,16 @@ public:
     MediaBrowser(QWidget *parent = Q_NULLPTR);
 	virtual ~MediaBrowser();
 protected:
-	virtual bool eventFilter(QObject *obj, QEvent *event) override;
 	virtual void closeEvent(QCloseEvent *event) override;
+	virtual void keyPressEvent(QKeyEvent *event) override;
 private slots:
 	
 	void onSelectSourceRoot();
 	void onSelectTargetRoot();	
 	void onThumbnailLoaded(int index, const QPixmap& pixmap);
 	void onThumbnailsFinished();
+	void onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers);
+	void onThumbnailDoubleClicked(int index);
 
 private:
 	void initPreviewArea();
@@ -51,6 +54,11 @@ private:
 
 	void updateSourceLabel();
 	void updateTargetLabel();
+
+	void updateSelection(int index, Qt::KeyboardModifiers modifiers);
+	void clearSelection();
+	void openFile(int index);
+	void updateSelectionStatus();
 
 	// Настройки
 	Settings cfg;
@@ -72,7 +80,9 @@ private:
 	// Данные текущей папки
 	QString currentFolder;          // Текущая просматриваемая папка
 	QVector<QString> currentFiles;  // Файлы в текущей папке
-	QVector<QLabel*> thumbnailLabels; // Ярлыки для превью
+	QVector<ThumbnailWidget*> thumbnailWidgets;  // вместо thumbnailLabels
+	QSet<int> selectedIndices;
+	int lastSelectedIndex = -1;
 
 	 // Загрузчик превью
 	ThumbnailLoader *thumbnailLoader;

@@ -46,9 +46,15 @@
     <ClCompile Include="Settings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="thumbnailwidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="ThumbnailLoader.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="thumbnailwidget.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>

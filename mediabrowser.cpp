@@ -325,21 +325,40 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 		statusBar()->showMessage(QString("Loading %1 files...").arg(currentFiles.size()));
 	}
 
+
+	// Очищаем старые виджеты
+	for (ThumbnailWidget *widget : thumbnailWidgets) {
+		if (widget) {
+			previewLayout->removeWidget(widget);
+			delete widget;
+		}
+	}
+	thumbnailWidgets.clear();
+	selectedIndices.clear();
+	lastSelectedIndex = -1;
+
 	// Создаем контейнеры для превью
 	const int columns = cfg.thumbnailColumns;
 	for (int i = 0; i < currentFiles.size(); ++i) {
-		QLabel *thumbnailLabel = new QLabel(previewContainer);
-		thumbnailLabel->setFixedSize(cfg.thumbnailSize + 20, cfg.thumbnailSize + 20);
-		thumbnailLabel->setAlignment(Qt::AlignCenter);
-		thumbnailLabel->setStyleSheet("border: 1px solid #ccc; background: #f0f0f0;");
-		thumbnailLabel->setText("Loading...");
+		ThumbnailWidget *thumbnailWidget = new ThumbnailWidget(i, previewContainer);
+		thumbnailWidget->setFixedSize(cfg.thumbnailSize + 20, cfg.thumbnailSize + 20);
+		thumbnailWidget->setText("Loading...");
+
+		// Подключаем сигналы
+		connect(thumbnailWidget, &ThumbnailWidget::clicked,
+			this, &MediaBrowser::onThumbnailClicked);
+		connect(thumbnailWidget, &ThumbnailWidget::doubleClicked,
+			this, &MediaBrowser::onThumbnailDoubleClicked);
 
 		int row = i / columns;
 		int col = i % columns;
 
-		previewLayout->addWidget(thumbnailLabel, row, col, Qt::AlignCenter);
-		thumbnailLabels.append(thumbnailLabel);
+		previewLayout->addWidget(thumbnailWidget, row, col, Qt::AlignCenter);
+		thumbnailWidgets.append(thumbnailWidget);
 	}
+
+
+
 
 	// Активируем кнопку перемещения
 	if (moveButton) {
@@ -357,34 +376,42 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 void MediaBrowser::clearThumbnails()
 {
 	// Удаляем все превью
-	for (QLabel *label : thumbnailLabels) {
-		if (label) {
-			previewLayout->removeWidget(label);
-			delete label;
+	for (ThumbnailWidget *widget : thumbnailWidgets) {
+		if (widget) {
+			previewLayout->removeWidget(widget);
+			delete widget;
 		}
 	}
-	thumbnailLabels.clear();
+	thumbnailWidgets.clear();
 	currentFiles.clear();
+	selectedIndices.clear();
+	lastSelectedIndex = -1;
 }
 
 void MediaBrowser::onThumbnailLoaded(int index, const QPixmap& pixmap)
 {
-	if (index >= 0 && index < thumbnailLabels.size()) {
-		QLabel *label = thumbnailLabels[index];
-		label->setPixmap(pixmap);
-		label->setText("");
+	if (index < 0 || index >= thumbnailWidgets.size()) {
+		qDebug() << "Invalid thumbnail index:" << index;
+		return;
+	}
 
-		// Добавляем подпись с именем файла
-		QString fileName = currentFiles[index];
-		if (fileName.length() > 20) {
-			fileName = fileName.left(17) + "...";
-		}
+	ThumbnailWidget *widget = thumbnailWidgets[index];
+	if (!widget) {
+		qDebug() << "Widget is null for index:" << index;
+		return;
+	}
 
-		QString toolTip = QString("<b>%1</b><br>Size: %2x%3")
-			.arg(currentFiles[index])
-			.arg(pixmap.width())
-			.arg(pixmap.height());
-		label->setToolTip(toolTip);
+	// Масштабируем превью
+	QPixmap scaled = pixmap.scaled(cfg.thumbnailSize, cfg.thumbnailSize,
+		Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+	// Устанавливаем превью
+	widget->setPixmap(scaled);
+	widget->setText("");
+
+	// Добавляем подсказку
+	if (index < currentFiles.size()) {
+		widget->setToolTip(currentFiles[index]);
 	}
 }
 
@@ -393,43 +420,131 @@ void MediaBrowser::onThumbnailsFinished()
 	statusBar()->showMessage("Loading finished", 3000);
 }
 
-bool MediaBrowser::eventFilter(QObject *obj, QEvent *event)
+void MediaBrowser::onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers)
 {
-	// Реализация открытия файла
-	if (event->type() == QEvent::MouseButtonDblClick) {
-		QLabel *label = qobject_cast<QLabel*>(obj);
-		if (label) {
-			int index = label->property("fileIndex").toInt();
-			if (index >= 0 && index < currentFiles.size()) {
-				QString filePath = cfg.sourceRoot + "/" + currentFiles[index];
-				QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
-				return true;
+	updateSelection(index, modifiers);
+}
+
+void MediaBrowser::updateSelection(int index, Qt::KeyboardModifiers modifiers)
+{
+	if (index < 0 || index >= thumbnailWidgets.size()) return;
+
+	// Без модификаторов - одиночное выделение
+	if (modifiers == Qt::NoModifier) {
+		clearSelection();
+		selectedIndices.insert(index);
+		thumbnailWidgets[index]->setSelected(true);
+		lastSelectedIndex = index;
+	}
+	// Ctrl - добавить/удалить из выделения
+	else if (modifiers & Qt::ControlModifier) {
+		if (selectedIndices.contains(index)) {
+			selectedIndices.remove(index);
+			thumbnailWidgets[index]->setSelected(false);
+			if (lastSelectedIndex == index) {
+				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
+			}
+		}
+		else {
+			selectedIndices.insert(index);
+			thumbnailWidgets[index]->setSelected(true);
+			lastSelectedIndex = index;
+		}
+	}
+	// Shift - выделить диапазон от lastSelectedIndex до index
+	else if (modifiers & Qt::ShiftModifier && lastSelectedIndex != -1) {
+		int start = qMin(lastSelectedIndex, index);
+		int end = qMax(lastSelectedIndex, index);
+
+		for (int i = start; i <= end; ++i) {
+			if (!selectedIndices.contains(i)) {
+				selectedIndices.insert(i);
+				thumbnailWidgets[i]->setSelected(true);
+			}
+		}
+	}
+	// Alt - исключить из выделения
+	else if (modifiers & Qt::AltModifier) {
+		if (selectedIndices.contains(index)) {
+			selectedIndices.remove(index);
+			thumbnailWidgets[index]->setSelected(false);
+			if (lastSelectedIndex == index) {
+				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
 			}
 		}
 	}
 
-	// Обработка наведения мыши для подсветки
-	if (event->type() == QEvent::Enter) {
-		QLabel *label = qobject_cast<QLabel*>(obj);
-		if (label) {
-			label->setStyleSheet(
-				"border: 2px solid #4CAF50; background: white;"
-				"padding: 5px;"
-			);
+	// Обновляем статус
+	updateSelectionStatus();
+}
+
+void MediaBrowser::clearSelection()
+{
+	for (int index : selectedIndices) {
+		if (index >= 0 && index < thumbnailWidgets.size()) {
+			thumbnailWidgets[index]->setSelected(false);
 		}
 	}
+	selectedIndices.clear();
+}
 
-	if (event->type() == QEvent::Leave) {
-		QLabel *label = qobject_cast<QLabel*>(obj);
-		if (label) {
-			label->setStyleSheet(
-				"border: 1px solid #ddd; background: white;"
-				"padding: 5px;"
-			);
+void MediaBrowser::updateSelectionStatus()
+{
+	if (!statusBar()) return;
+
+	QString message;
+	if (selectedIndices.isEmpty()) {
+		message = tr("No items selected");
+	}
+	else if (selectedIndices.size() == 1) {
+		int index = *selectedIndices.begin();
+		if (index >= 0 && index < currentFiles.size()) {
+			QString filename = currentFiles[index];
+			if (filename.length() > 30) {
+				filename = filename.left(27) + "...";
+			}
+			message = tr("Selected: %1").arg(filename);
 		}
 	}
+	else {
+		message = tr("%1 items selected").arg(selectedIndices.size());
+	}
 
-	return QMainWindow::eventFilter(obj, event);
+	statusBar()->showMessage(message);
+}
+
+void MediaBrowser::onThumbnailDoubleClicked(int index)
+{
+	openFile(index);
+}
+
+void MediaBrowser::openFile(int index)
+{
+	if (index < 0 || index >= currentFiles.size()) {
+		qDebug() << "Invalid index for file open:" << index;
+		return;
+	}
+
+	QString filePath = QDir(currentFolder).absoluteFilePath(currentFiles[index]);
+	QFileInfo fileInfo(filePath);
+
+	if (!fileInfo.exists()) {
+		qDebug() << "File doesn't exist:" << filePath;
+		QMessageBox::warning(this, "Error",
+			tr("File not found:\n%1").arg(filePath));
+		return;
+	}
+
+	qDebug() << "Opening file:" << filePath;
+
+	// Открываем файл стандартной программой
+	bool success = QDesktopServices::openUrl(QUrl::fromLocalFile(filePath));
+
+	if (!success) {
+		qDebug() << "Failed to open file:" << filePath;
+		QMessageBox::warning(this, "Error",
+			tr("Cannot open file:\n%1").arg(filePath));
+	}
 }
 
 void MediaBrowser::closeEvent(QCloseEvent *event)
@@ -440,6 +555,33 @@ void MediaBrowser::closeEvent(QCloseEvent *event)
 	}
 
 	QMainWindow::closeEvent(event);
+}
+
+void MediaBrowser::keyPressEvent(QKeyEvent *event)
+{
+	if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
+		// Ctrl+A - выделить все
+		clearSelection();
+		for (int i = 0; i < thumbnailWidgets.size(); ++i) {
+			selectedIndices.insert(i);
+			thumbnailWidgets[i]->setSelected(true);
+		}
+		if (!thumbnailWidgets.isEmpty()) {
+			lastSelectedIndex = 0;
+		}
+		updateSelectionStatus();
+		event->accept();
+	}
+	else if (event->key() == Qt::Key_Escape) {
+		// Escape - снять выделение
+		clearSelection();
+		lastSelectedIndex = -1;
+		updateSelectionStatus();
+		event->accept();
+	}
+	else {
+		QMainWindow::keyPressEvent(event);
+	}
 }
 
 QString MediaBrowser::findNextUnprocessedDir()
