@@ -86,6 +86,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FFmpegThumbnailer.cpp" />
+    <ClCompile Include="previewarea.cpp">
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Filename).moc</QtMocFileName>
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Filename).moc</QtMocFileName>
+    </ClCompile>
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="ThumbnailLoader.cpp" />
     <ClCompile Include="thumbnailwidget.cpp" />
@@ -99,6 +105,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FFmpegThumbnailer.h" />
+    <QtMoc Include="previewarea.h" />
     <ClInclude Include="Settings.h" />
     <QtMoc Include="thumbnailwidget.h" />
   </ItemGroup>
