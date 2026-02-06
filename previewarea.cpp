@@ -36,7 +36,7 @@ PreviewArea::PreviewArea(QWidget *parent)
 	);
 		
 	setWidget(container);
-	updateBackground();
+	updateBackgroundStyle();
 }
 
 PreviewArea::~PreviewArea()
@@ -112,8 +112,42 @@ void PreviewArea::clearThumbnails()
 	}
 	thumbnailWidgets.clear();
 	filenames.clear();
+	selectedIndices.clear();
+	lastSelectedIndex = -1;
+	if (container)
+		container->adjustSize();
+}
 
-	container->adjustSize();
+void PreviewArea::setThumbnailCount(int count)
+{
+	clearThumbnails();
+
+	if (count <= 0) return;
+
+	filenames.resize(count);
+
+	for (int i = 0; i < count; ++i) {
+		ThumbnailWidget *widget = new ThumbnailWidget(i, container);
+		widget->setFixedSize(thumbnailSize + 20, thumbnailSize + 20);
+		widget->setText("Loading...");
+
+		// Подключаем сигналы
+		connect(widget, &ThumbnailWidget::clicked,
+			this, &PreviewArea::onThumbnailWidgetClicked);
+		connect(widget, &ThumbnailWidget::doubleClicked,
+			this, &PreviewArea::onThumbnailWidgetDoubleClicked);
+
+		int row = i / columns;
+		int col = i % columns;
+		layout->addWidget(widget, row, col, Qt::AlignCenter);
+
+		thumbnailWidgets.append(widget);
+		filenames[i] = "";  // Пустое имя пока
+	}
+
+	if (container) {
+		container->adjustSize();
+	}
 }
 
 void PreviewArea::addThumbnail(int index, const QString& filename, const QPixmap& pixmap)
@@ -168,6 +202,37 @@ void PreviewArea::onThumbnailLoaded(int index, const QPixmap& pixmap)
 	}
 }
 
+// PreviewArea.cpp
+void PreviewArea::setSelection(const QSet<int>& indices)
+{
+	// Снимаем старое выделение
+	for (int index : selectedIndices) {
+		if (index >= 0 && index < thumbnailWidgets.size()) {
+			if (ThumbnailWidget* widget = thumbnailWidgets[index]) {
+				widget->setSelected(false);
+			}
+		}
+	}
+
+	// Устанавливаем новое выделение
+	selectedIndices = indices;
+	lastSelectedIndex = -1;
+
+	for (int index : selectedIndices) {
+		if (index >= 0 && index < thumbnailWidgets.size()) {
+			if (ThumbnailWidget* widget = thumbnailWidgets[index]) {
+				widget->setSelected(true);
+				if (lastSelectedIndex == -1) {
+					lastSelectedIndex = index;
+				}
+			}
+		}
+	}
+
+	updateBackgroundStyle();
+	emit selectionChanged(selectedIndices);
+}
+
 void PreviewArea::clearSelection()
 {
 	if (selectedIndices.isEmpty()) return;
@@ -180,7 +245,7 @@ void PreviewArea::clearSelection()
 
 	selectedIndices.clear();
 	lastSelectedIndex = -1;
-	updateBackground();
+	updateBackgroundStyle();
 	emit selectionCleared();
 	emit selectionChanged(selectedIndices);
 }
@@ -227,7 +292,7 @@ void PreviewArea::onThumbnailWidgetClicked(int index, Qt::KeyboardModifiers modi
 		}
 	}
 
-	updateBackground();
+	updateBackgroundStyle();
 	emit thumbnailClicked(index, modifiers);
 	emit selectionChanged(selectedIndices);
 }
@@ -242,7 +307,7 @@ void PreviewArea::onContainerClicked()
 	clearSelection();
 }
 
-void PreviewArea::updateBackground()
+void PreviewArea::updateBackgroundStyle()
 {
 	// Меняем фон в зависимости от наличия выделения
 	QString style = QString(
@@ -305,5 +370,5 @@ void PreviewArea::updateSelection(int index, Qt::KeyboardModifiers modifiers)
 		}
 	}
 
-	updateBackground();
+	updateBackgroundStyle();
 }

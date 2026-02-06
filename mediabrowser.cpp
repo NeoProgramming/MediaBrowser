@@ -18,9 +18,7 @@
 MediaBrowser::MediaBrowser(QWidget *parent)
     : QMainWindow(parent)
 	, categoriesModel(nullptr)
-	, previewScrollArea(nullptr)
-	, previewContainer(nullptr)
-	, previewLayout(nullptr)
+	, previewArea(nullptr)
 	, thumbnailLoader(nullptr)
 	, loaderThread(nullptr)
 {
@@ -31,6 +29,8 @@ MediaBrowser::MediaBrowser(QWidget *parent)
 	initPreviewArea();
 	initSidebar();
 	initMenu();
+
+	resize(1200, 800);
 
 	// Загружаем первую папку через таймер (после инициализации UI)
 	QTimer::singleShot(100, this, &MediaBrowser::loadNextUnprocessedFolder);
@@ -54,6 +54,14 @@ MediaBrowser::~MediaBrowser()
 
 void MediaBrowser::initPreviewArea()
 {
+	// Создаем область превью
+	previewArea = new PreviewArea(this);
+	previewArea->setThumbnailSize(cfg.thumbnailSize);
+	previewArea->setColumns(cfg.thumbnailColumns);
+
+	// Устанавливаем как центральный виджет
+	setCentralWidget(previewArea);
+	/*
 	// Создаем область прокрутки для превью
 	previewScrollArea = new QScrollArea(this);
 	previewScrollArea->setWidgetResizable(true);
@@ -73,18 +81,33 @@ void MediaBrowser::initPreviewArea()
 	setCentralWidget(previewScrollArea);
 	setMinimumSize(800, 600);
 
+	*/
+
 	// Инициализируем загрузчик превью в отдельном потоке
 	thumbnailLoader = new ThumbnailLoader(cfg.ffmpegPath, cfg.thumbnailSize);
 	loaderThread = new QThread();
 	thumbnailLoader->moveToThread(loaderThread);
 
-	// Подключаем сигналы от загрузчика
+
+	// Подключаем сигналы загрузчика к PreviewArea
 	connect(thumbnailLoader, &ThumbnailLoader::thumbnailLoaded,
-		this, &MediaBrowser::onThumbnailLoaded);
+		previewArea, &PreviewArea::onThumbnailLoaded);
 	connect(thumbnailLoader, &ThumbnailLoader::loadingFinished,
 		this, &MediaBrowser::onThumbnailsFinished);
+	connect(thumbnailLoader, &ThumbnailLoader::errorOccurred,
+		this, &MediaBrowser::onThumbnailLoaderError);
 	connect(loaderThread, &QThread::finished,
 		thumbnailLoader, &QObject::deleteLater);
+
+	// Подключаем сигналы от PreviewArea
+	connect(previewArea, &PreviewArea::thumbnailClicked,
+		this, &MediaBrowser::onThumbnailClicked);
+	connect(previewArea, &PreviewArea::thumbnailDoubleClicked,
+		this, &MediaBrowser::onThumbnailDoubleClicked);
+	connect(previewArea, &PreviewArea::selectionChanged,
+		this, &MediaBrowser::onSelectionChanged);
+	connect(previewArea, &PreviewArea::selectionCleared,
+		this, &MediaBrowser::onSelectionCleared);
 
 	// Запускаем поток загрузчика
 	loaderThread->start();
@@ -293,18 +316,10 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 		QThread::msleep(100); // Даем время на отмену
 	}
 
-	// Очищаем старые превью
-	clearThumbnails();
 
 	currentFolder = folderPath;
-	setWindowTitle("Media Browser - " + QFileInfo(folderPath).fileName());
-
-	// Обновляем label с текущей папкой
-	if (labSrc) {
-		QString text = tr("Current: ") + QFileInfo(folderPath).fileName();
-		labSrc->setText(text);
-	}
-
+	setWindowTitle("Media Browser - " + folderPath);
+		
 	// Получаем список файлов в папке
 	QDir dir(folderPath);
 
@@ -320,46 +335,20 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 	QStringList allFilters = imageFilters + videoFilters;
 	currentFiles = dir.entryList(allFilters, QDir::Files, QDir::Name).toVector();
 
+	// Очищаем и настраиваем PreviewArea
+	previewArea->clearThumbnails();
+	previewArea->setThumbnailCount(currentFiles.size());
+
+	// Устанавливаем имена файлов в плейсхолдеры
+	for (int i = 0; i < currentFiles.size(); ++i) {
+		previewArea->setPlaceholder(i, "Loading...");
+	}
+
 	// Обновляем статус
 	if (statusBar()) {
 		statusBar()->showMessage(QString("Loading %1 files...").arg(currentFiles.size()));
 	}
-
-
-	// Очищаем старые виджеты
-	for (ThumbnailWidget *widget : thumbnailWidgets) {
-		if (widget) {
-			previewLayout->removeWidget(widget);
-			delete widget;
-		}
-	}
-	thumbnailWidgets.clear();
-	selectedIndices.clear();
-	lastSelectedIndex = -1;
-
-	// Создаем контейнеры для превью
-	const int columns = cfg.thumbnailColumns;
-	for (int i = 0; i < currentFiles.size(); ++i) {
-		ThumbnailWidget *thumbnailWidget = new ThumbnailWidget(i, previewContainer);
-		thumbnailWidget->setFixedSize(cfg.thumbnailSize + 20, cfg.thumbnailSize + 20);
-		thumbnailWidget->setText("Loading...");
-
-		// Подключаем сигналы
-		connect(thumbnailWidget, &ThumbnailWidget::clicked,
-			this, &MediaBrowser::onThumbnailClicked);
-		connect(thumbnailWidget, &ThumbnailWidget::doubleClicked,
-			this, &MediaBrowser::onThumbnailDoubleClicked);
-
-		int row = i / columns;
-		int col = i % columns;
-
-		previewLayout->addWidget(thumbnailWidget, row, col, Qt::AlignCenter);
-		thumbnailWidgets.append(thumbnailWidget);
-	}
-
-
-
-
+		
 	// Активируем кнопку перемещения
 	if (moveButton) {
 		moveButton->setEnabled(true);
@@ -373,46 +362,46 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 	}
 }
 
-void MediaBrowser::clearThumbnails()
+
+void MediaBrowser::onSelectionChanged(const QSet<int>& selectedIndices)
 {
-	// Удаляем все превью
-	for (ThumbnailWidget *widget : thumbnailWidgets) {
-		if (widget) {
-			previewLayout->removeWidget(widget);
-			delete widget;
+	// Обновляем статус или передаем в будущую панель тегов
+	QString message;
+	if (selectedIndices.isEmpty()) {
+		message = "No selection";
+	}
+	else if (selectedIndices.size() == 1) {
+		int index = *selectedIndices.begin();
+		if (index < currentFiles.size()) {
+			message = QString("Selected: %1").arg(currentFiles[index]);
 		}
 	}
-	thumbnailWidgets.clear();
-	currentFiles.clear();
-	selectedIndices.clear();
-	lastSelectedIndex = -1;
+	else {
+		message = QString("%1 items selected").arg(selectedIndices.size());
+	}
+
+	statusBar()->showMessage(message);
+
+	// TODO: Когда появится TagsPanel
+	// if (tagsPanel) {
+	//     QStringList selectedFiles;
+	//     for (int index : selectedIndices) {
+	//         if (index < currentFiles.size()) {
+	//             selectedFiles.append(QDir(currentFolder).absoluteFilePath(currentFiles[index]));
+	//         }
+	//     }
+	//     tagsPanel->onFileSelectionChanged(selectedIndices, selectedFiles);
+	// }
 }
 
-void MediaBrowser::onThumbnailLoaded(int index, const QPixmap& pixmap)
+void MediaBrowser::onSelectionCleared()
 {
-	if (index < 0 || index >= thumbnailWidgets.size()) {
-		qDebug() << "Invalid thumbnail index:" << index;
-		return;
-	}
+	statusBar()->showMessage("Selection cleared", 2000);
 
-	ThumbnailWidget *widget = thumbnailWidgets[index];
-	if (!widget) {
-		qDebug() << "Widget is null for index:" << index;
-		return;
-	}
-
-	// Масштабируем превью
-	QPixmap scaled = pixmap.scaled(cfg.thumbnailSize, cfg.thumbnailSize,
-		Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-	// Устанавливаем превью
-	widget->setPixmap(scaled);
-	widget->setText("");
-
-	// Добавляем подсказку
-	if (index < currentFiles.size()) {
-		widget->setToolTip(currentFiles[index]);
-	}
+	// TODO: Когда появится TagsPanel
+	// if (tagsPanel) {
+	//     tagsPanel->onFileSelectionChanged(QSet<int>(), QStringList());
+	// }
 }
 
 void MediaBrowser::onThumbnailsFinished()
@@ -420,97 +409,18 @@ void MediaBrowser::onThumbnailsFinished()
 	statusBar()->showMessage("Loading finished", 3000);
 }
 
+void MediaBrowser::onThumbnailLoaderError(const QString& error)
+{
+	qDebug() << "ThumbnailLoader error:" << error;
+	statusBar()->showMessage("Error: " + error, 5000);
+}
+
+// Слоты для PreviewArea
+
 void MediaBrowser::onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers)
 {
-	updateSelection(index, modifiers);
-}
-
-void MediaBrowser::updateSelection(int index, Qt::KeyboardModifiers modifiers)
-{
-	if (index < 0 || index >= thumbnailWidgets.size()) return;
-
-	// Без модификаторов - одиночное выделение
-	if (modifiers == Qt::NoModifier) {
-		clearSelection();
-		selectedIndices.insert(index);
-		thumbnailWidgets[index]->setSelected(true);
-		lastSelectedIndex = index;
-	}
-	// Ctrl - добавить/удалить из выделения
-	else if (modifiers & Qt::ControlModifier) {
-		if (selectedIndices.contains(index)) {
-			selectedIndices.remove(index);
-			thumbnailWidgets[index]->setSelected(false);
-			if (lastSelectedIndex == index) {
-				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
-			}
-		}
-		else {
-			selectedIndices.insert(index);
-			thumbnailWidgets[index]->setSelected(true);
-			lastSelectedIndex = index;
-		}
-	}
-	// Shift - выделить диапазон от lastSelectedIndex до index
-	else if (modifiers & Qt::ShiftModifier && lastSelectedIndex != -1) {
-		int start = qMin(lastSelectedIndex, index);
-		int end = qMax(lastSelectedIndex, index);
-
-		for (int i = start; i <= end; ++i) {
-			if (!selectedIndices.contains(i)) {
-				selectedIndices.insert(i);
-				thumbnailWidgets[i]->setSelected(true);
-			}
-		}
-	}
-	// Alt - исключить из выделения
-	else if (modifiers & Qt::AltModifier) {
-		if (selectedIndices.contains(index)) {
-			selectedIndices.remove(index);
-			thumbnailWidgets[index]->setSelected(false);
-			if (lastSelectedIndex == index) {
-				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
-			}
-		}
-	}
-
-	// Обновляем статус
-	updateSelectionStatus();
-}
-
-void MediaBrowser::clearSelection()
-{
-	for (int index : selectedIndices) {
-		if (index >= 0 && index < thumbnailWidgets.size()) {
-			thumbnailWidgets[index]->setSelected(false);
-		}
-	}
-	selectedIndices.clear();
-}
-
-void MediaBrowser::updateSelectionStatus()
-{
-	if (!statusBar()) return;
-
-	QString message;
-	if (selectedIndices.isEmpty()) {
-		message = tr("No items selected");
-	}
-	else if (selectedIndices.size() == 1) {
-		int index = *selectedIndices.begin();
-		if (index >= 0 && index < currentFiles.size()) {
-			QString filename = currentFiles[index];
-			if (filename.length() > 30) {
-				filename = filename.left(27) + "...";
-			}
-			message = tr("Selected: %1").arg(filename);
-		}
-	}
-	else {
-		message = tr("%1 items selected").arg(selectedIndices.size());
-	}
-
-	statusBar()->showMessage(message);
+	qDebug() << "Thumbnail clicked:" << index << "modifiers:" << modifiers;
+	// Здесь можно добавить дополнительную логику при клике
 }
 
 void MediaBrowser::onThumbnailDoubleClicked(int index)
@@ -559,25 +469,26 @@ void MediaBrowser::closeEvent(QCloseEvent *event)
 
 void MediaBrowser::keyPressEvent(QKeyEvent *event)
 {
-	if (event->key() == Qt::Key_A && event->modifiers() & Qt::ControlModifier) {
-		// Ctrl+A - выделить все
-		clearSelection();
-		for (int i = 0; i < thumbnailWidgets.size(); ++i) {
-			selectedIndices.insert(i);
-			thumbnailWidgets[i]->setSelected(true);
+	// Escape - снять выделение
+	if (event->key() == Qt::Key_Escape) {
+		if (previewArea) {
+			previewArea->clearSelection();
 		}
-		if (!thumbnailWidgets.isEmpty()) {
-			lastSelectedIndex = 0;
-		}
-		updateSelectionStatus();
 		event->accept();
+		return;
 	}
-	else if (event->key() == Qt::Key_Escape) {
-		// Escape - снять выделение
-		clearSelection();
-		lastSelectedIndex = -1;
-		updateSelectionStatus();
+
+	// Ctrl+A - выделить все
+	if (event->key() == Qt::Key_A && event->modifiers() == Qt::ControlModifier) {
+		if (previewArea && previewArea->getThumbnailCount() > 0) {
+			QSet<int> allIndices;
+			for (int i = 0; i < previewArea->getThumbnailCount(); ++i) {
+				allIndices.insert(i);
+			}
+			previewArea->setSelection(allIndices);
+		}
 		event->accept();
+		return;
 	}
 	else {
 		QMainWindow::keyPressEvent(event);
@@ -667,7 +578,7 @@ void MediaBrowser::moveCurrentFolder()
 	statusBar()->showMessage(QString("Папка перемещена в %1").arg(targetPath), 5000);
 
 	// Очищаем и загружаем следующую папку
-	clearThumbnails();
+	previewArea->clearThumbnails();
 	moveButton->setEnabled(false);
 
 	// Ищем следующую папку в исходной директории

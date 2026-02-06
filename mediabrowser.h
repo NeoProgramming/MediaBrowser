@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include "Settings.h"
 #include "ThumbnailWidget.h"
+#include "previewarea.h"
 
 class ThumbnailLoader;
 
@@ -35,17 +36,20 @@ private slots:
 	
 	void onSelectSourceRoot();
 	void onSelectTargetRoot();	
-	void onThumbnailLoaded(int index, const QPixmap& pixmap);
+
+	// Слоты загрузчика
+
 	void onThumbnailsFinished();
+	void onThumbnailLoaderError(const QString& error);
 	void onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers);
 	void onThumbnailDoubleClicked(int index);
-
+	void onSelectionChanged(const QSet<int>& selectedIndices);
+	void onSelectionCleared();
 private:
 	void initPreviewArea();
 	void initSidebar();
 	void initMenu();
 
-	void clearThumbnails();
 	void moveCurrentFolder();
 	QString findNextUnprocessedDir();
 	void loadNextUnprocessedFolder();
@@ -55,10 +59,7 @@ private:
 	void updateSourceLabel();
 	void updateTargetLabel();
 
-	void updateSelection(int index, Qt::KeyboardModifiers modifiers);
-	void clearSelection();
 	void openFile(int index);
-	void updateSelectionStatus();
 
 	// Настройки
 	Settings cfg;
@@ -73,17 +74,12 @@ private:
 	QPushButton *newCategoryButton; // Кнопка "New theme"
 
 	// UI элементы основной области (превью)
-	QScrollArea *previewScrollArea; // Область с прокруткой для превью
-	QWidget *previewContainer;      // Контейнер для миниатюр
-	QGridLayout *previewLayout;     // Layout для размещения миниатюр
+	PreviewArea *previewArea;           // Заменяем три переменные одной!
 
 	// Данные текущей папки
 	QString currentFolder;          // Текущая просматриваемая папка
 	QVector<QString> currentFiles;  // Файлы в текущей папке
-	QVector<ThumbnailWidget*> thumbnailWidgets;  // вместо thumbnailLabels
-	QSet<int> selectedIndices;
-	int lastSelectedIndex = -1;
-
+	
 	 // Загрузчик превью
 	ThumbnailLoader *thumbnailLoader;
 	QThread *loaderThread;

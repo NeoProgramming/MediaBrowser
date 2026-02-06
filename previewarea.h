@@ -19,9 +19,11 @@ public:
 	// Основные методы
 	void setThumbnailSize(int size);
 	void setColumns(int columns);
+	void setThumbnailCount(int count);
 	void clearThumbnails();
 	void addThumbnail(int index, const QString& filename, const QPixmap& pixmap);
 	void setPlaceholder(int index, const QString& text = "Loading...");
+	void setSelection(const QSet<int>& indices);
 
 	// Управление выделением
 	void clearSelection();
@@ -60,7 +62,7 @@ private:
 	int lastSelectedIndex;
 
 	// Фоновая подсветка
-	void updateBackground();
+	void updateBackgroundStyle();
 	bool hasSelection() const { return !selectedIndices.isEmpty(); }
 
 private slots:
