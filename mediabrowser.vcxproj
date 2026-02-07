@@ -85,6 +85,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="categoriespanel.cpp" />
     <ClCompile Include="FFmpegThumbnailer.cpp" />
     <ClCompile Include="previewarea.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">input</DynamicSource>
@@ -104,6 +105,7 @@
     <QtMoc Include="ThumbnailLoader.h" />
   </ItemGroup>
   <ItemGroup>
+    <QtMoc Include="categoriespanel.h" />
     <ClInclude Include="FFmpegThumbnailer.h" />
     <QtMoc Include="previewarea.h" />
     <ClInclude Include="Settings.h" />

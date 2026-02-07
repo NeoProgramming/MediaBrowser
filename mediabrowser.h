@@ -19,6 +19,7 @@
 #include "Settings.h"
 #include "ThumbnailWidget.h"
 #include "previewarea.h"
+#include "categoriespanel.h"
 
 class ThumbnailLoader;
 
@@ -33,18 +34,24 @@ protected:
 	virtual void closeEvent(QCloseEvent *event) override;
 	virtual void keyPressEvent(QKeyEvent *event) override;
 private slots:
-	
-	void onSelectSourceRoot();
-	void onSelectTargetRoot();	
 
-	// Слоты загрузчика
-
+	// Слоты для превью
 	void onThumbnailsFinished();
 	void onThumbnailLoaderError(const QString& error);
 	void onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers);
 	void onThumbnailDoubleClicked(int index);
 	void onSelectionChanged(const QSet<int>& selectedIndices);
 	void onSelectionCleared();
+
+	// Слоты для категорий
+	void onMoveRequested(const QString& targetCategory);
+	
+	void onTargetRootChanged(const QString& newPath);
+
+	// Слоты меню
+	void onSelectSourceRoot();
+	void onSelectTargetRoot();
+
 private:
 	void initPreviewArea();
 	void initSidebar();
@@ -56,25 +63,14 @@ private:
 
 	void loadFolderThumbnails(const QString& folderPath);
 
-	void updateSourceLabel();
-	void updateTargetLabel();
-
 	void openFile(int index);
 
 	// Настройки
 	Settings cfg;
 
-	// UI элементы боковой панели (докинг)
-	QLabel *labSrc;                 // Папка-источник сортируемого контента
-	QLabel *labDst;                 // Корневая папка для дерева категорий
-	QDockWidget *sidebarDock;       // Докинг-панель
-	QTreeView *categoryTree;        // Визуальное дерево папок-категорий
-	QFileSystemModel *categoriesModel; // Модель файловой системы для дерева категорий
-	QPushButton *moveButton;        // Кнопка "MOVE"
-	QPushButton *newCategoryButton; // Кнопка "New theme"
-
-	// UI элементы основной области (превью)
-	PreviewArea *previewArea;           // Заменяем три переменные одной!
+	// UI элементы 
+	PreviewArea *previewArea;
+	CategoriesPanel *categoriesPanel;
 
 	// Данные текущей папки
 	QString currentFolder;          // Текущая просматриваемая папка

@@ -17,7 +17,7 @@
 
 MediaBrowser::MediaBrowser(QWidget *parent)
     : QMainWindow(parent)
-	, categoriesModel(nullptr)
+	, categoriesPanel(nullptr)
 	, previewArea(nullptr)
 	, thumbnailLoader(nullptr)
 	, loaderThread(nullptr)
@@ -61,33 +61,11 @@ void MediaBrowser::initPreviewArea()
 
 	// Устанавливаем как центральный виджет
 	setCentralWidget(previewArea);
-	/*
-	// Создаем область прокрутки для превью
-	previewScrollArea = new QScrollArea(this);
-	previewScrollArea->setWidgetResizable(true);
-	previewScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-	previewScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-
-	// Создаем контейнер для миниатюр
-	previewContainer = new QWidget();
-	previewLayout = new QGridLayout(previewContainer);
-	previewLayout->setSpacing(10);
-	previewLayout->setContentsMargins(10, 10, 10, 10);
-
-	// Устанавливаем контейнер в область прокрутки
-	previewScrollArea->setWidget(previewContainer);
-
-	// Устанавливаем область прокрутки как центральный виджет
-	setCentralWidget(previewScrollArea);
-	setMinimumSize(800, 600);
-
-	*/
-
+	
 	// Инициализируем загрузчик превью в отдельном потоке
 	thumbnailLoader = new ThumbnailLoader(cfg.ffmpegPath, cfg.thumbnailSize);
 	loaderThread = new QThread();
 	thumbnailLoader->moveToThread(loaderThread);
-
 
 	// Подключаем сигналы загрузчика к PreviewArea
 	connect(thumbnailLoader, &ThumbnailLoader::thumbnailLoaded,
@@ -115,108 +93,18 @@ void MediaBrowser::initPreviewArea()
 
 void MediaBrowser::initSidebar()
 {
-	// Создаем док-виджет для боковой панели
-	sidebarDock = new QDockWidget(tr("Categories"), this);
-	sidebarDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+	// Создаем панель категорий
+	categoriesPanel = new CategoriesPanel(this);
+	categoriesPanel->setTargetRoot(cfg.targetRoot);
+	addDockWidget(Qt::LeftDockWidgetArea, categoriesPanel);
 
-	// Создаем содержимое для док-виджета
-	QWidget *sidebarContent = new QWidget;
-	QVBoxLayout *sidebarLayout = new QVBoxLayout(sidebarContent);
-
-	// Создаем UI элементы
-	labSrc = new QLabel(tr("Src: <NOT SELECTED>"));
-	labDst = new QLabel(tr("Dst: <NOT SELECTED>"));
-	moveButton = new QPushButton(tr("MOVE"));
-	categoryTree = new QTreeView();
-	newCategoryButton = new QPushButton(tr("New theme"));
-
-	// Добавляем элементы в layout
-	sidebarLayout->addWidget(labSrc);
-	sidebarLayout->addWidget(moveButton);
-	sidebarLayout->addWidget(labDst);
-	sidebarLayout->addWidget(categoryTree, 1); // Растягиваем дерево
-	sidebarLayout->addWidget(newCategoryButton);
-	sidebarLayout->addStretch(); // Растягивающийся элемент внизу
-
-	// Устанавливаем layout на виджет
-	sidebarContent->setLayout(sidebarLayout);
-	sidebarDock->setWidget(sidebarContent);
-
-	// Добавляем док-виджет в главное окно слева
-	addDockWidget(Qt::LeftDockWidgetArea, sidebarDock);
-
-	// Настройка модели для дерева категорий
-	categoriesModel = new QFileSystemModel(this);
-	categoriesModel->setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
-
-	// Устанавливаем корневую папку из настроек
-	if (cfg.targetRoot.isEmpty() || !QDir(cfg.targetRoot).exists()) {
-		// Если папка не существует, используем домашнюю
-		cfg.targetRoot = QDir::homePath() + "/Media_Categories";
-		QDir().mkpath(cfg.targetRoot);
-		cfg.saveSettings();
-	}
-
-	categoriesModel->setRootPath(cfg.targetRoot);
-	categoryTree->setModel(categoriesModel);
-	categoryTree->setRootIndex(categoriesModel->index(cfg.targetRoot));
-
-	// Обновляем подписи
-	updateSourceLabel();
-	updateTargetLabel();
-
-	// Настройка внешнего вида док-панели
-	sidebarDock->setFeatures(QDockWidget::DockWidgetMovable |
-		QDockWidget::DockWidgetFloatable |
-		QDockWidget::DockWidgetClosable);
-
-	// Настройка дерева категорий
-	categoryTree->setHeaderHidden(true);
-	categoryTree->setAnimated(true);
-	categoryTree->hideColumn(1); // Скрываем колонки размера, типа и даты
-	categoryTree->hideColumn(2);
-	categoryTree->hideColumn(3);
-
-	// Стиль выделения
-	QString styleSheet =
-		"QTreeView::item:selected:!active {"
-		"    background-color: #2196F3;"
-		"    color: #000000;"
-		"}";
-	categoryTree->setStyleSheet(styleSheet);
-
+	// Подключаем сигналы от панели категорий
+	connect(categoriesPanel, &CategoriesPanel::moveRequested,
+		this, &MediaBrowser::onMoveRequested);
+	
 	// Подключаем сигналы кнопок (функции будут реализованы позже)
 	// connect(newCategoryButton, &QPushButton::clicked, this, &MediaBrowser::createNewCategory);
 	// connect(moveButton, &QPushButton::clicked, this, &MediaBrowser::moveCurrentFolder);
-}
-
-// Вспомогательные функции для обновления надписей
-void MediaBrowser::updateSourceLabel()
-{
-	QString text = tr("Src: ");
-	if (cfg.sourceRoot.isEmpty() || !QDir(cfg.sourceRoot).exists()) {
-		text += "<NOT SELECTED>";
-	}
-	else {
-		text += cfg.sourceRoot;
-	}
-	if (labSrc) {
-		labSrc->setText(text);
-	}
-}
-
-void MediaBrowser::updateTargetLabel()
-{
-	QString text = tr("Dst: ");
-	if (cfg.targetRoot.isEmpty() || !QDir(cfg.targetRoot).exists()) {
-		text += "<NOT SELECTED>";
-	}
-	else {
-		text += cfg.targetRoot;
-	}
-	if (labDst) {
-		labDst->setText(text);
-	}
 }
 
 void MediaBrowser::initMenu()
@@ -237,25 +125,29 @@ void MediaBrowser::initMenu()
 
 	fileMenu->addSeparator();
 
-	// Пункт: Move to custom folder
-	QAction *moveCustomAction = fileMenu->addAction(tr("Move to &custom folder"));
-	moveCustomAction->setShortcut(QKeySequence("Ctrl+M"));
-	connect(moveCustomAction, &QAction::triggered, this, [this]() {
-		// TODO: Реализовать перемещение в произвольную папку
-		qDebug() << "Move to custom folder clicked";
+	// Пункт: Move selected items
+	QAction *moveSelectedAction = fileMenu->addAction(tr("Move selected items to custom folder"));
+	connect(moveSelectedAction, &QAction::triggered, this, [this]() {
+		// TODO: Реализовать перемещение выбранных элементов в произвольную папку
+		qDebug() << "Move selected items to custom folder clicked";
+	});
+
+	// Пункт: Move selected items
+	QAction *moveFolderAction = fileMenu->addAction(tr("Move current folder to custom folder"));
+	connect(moveFolderAction, &QAction::triggered, this, [this]() {
+		// TODO: Реализовать перемещение текущей папки в произвольную папку
+		qDebug() << "Move current folder to custom folder clicked";
 	});
 
 	// Пункт: Delete selected items
-	QAction *deleteSelectedAction = fileMenu->addAction(tr("&Delete selected items"));
-	deleteSelectedAction->setShortcut(QKeySequence("Del"));
+	QAction *deleteSelectedAction = fileMenu->addAction(tr("Delete selected items"));
 	connect(deleteSelectedAction, &QAction::triggered, this, [this]() {
 		// TODO: Реализовать удаление выбранных элементов
 		qDebug() << "Delete selected items clicked";
 	});
 
 	// Пункт: Delete current folder
-	QAction *deleteFolderAction = fileMenu->addAction(tr("Delete current &folder"));
-	deleteFolderAction->setShortcut(QKeySequence("Ctrl+Del"));
+	QAction *deleteFolderAction = fileMenu->addAction(tr("Delete current folder"));
 	connect(deleteFolderAction, &QAction::triggered, this, [this]() {
 		// TODO: Реализовать удаление текущей папки
 		qDebug() << "Delete current folder clicked";
@@ -267,45 +159,28 @@ void MediaBrowser::initMenu()
 	QAction *quitAction = fileMenu->addAction(tr("&Quit"));
 	quitAction->setShortcut(QKeySequence::Quit);
 	connect(quitAction, &QAction::triggered, this, &QWidget::close);
-}
 
-void MediaBrowser::onSelectSourceRoot()
-{
-	QString folder = QFileDialog::getExistingDirectory(
-		this,
-		"Select source root folder",
-		cfg.sourceRoot.isEmpty() ? QDir::homePath() : cfg.sourceRoot
-	);
 
-	if (!folder.isEmpty()) {
-		cfg.sourceRoot = folder;
-		cfg.saveSettings();
-		updateSourceLabel();
-		// Сразу загружаем первую папку из нового источника
-		loadNextUnprocessedFolder();
-	}
-}
+	QMenu *viewMenu = menuBar()->addMenu("&View");
 
-void MediaBrowser::onSelectTargetRoot()
-{
-	QString folder = QFileDialog::getExistingDirectory(
-		this,
-		"Select target root",
-		cfg.targetRoot.isEmpty() ? QDir::homePath() : cfg.targetRoot
-	);
+	QAction *showCategoriesAction = viewMenu->addAction("Show &categories panel");
+	showCategoriesAction->setCheckable(true);
+	showCategoriesAction->setChecked(true);
+	connect(showCategoriesAction, &QAction::toggled,
+		categoriesPanel, &QDockWidget::setVisible);
 
-	if (!folder.isEmpty()) {
-		cfg.targetRoot = folder;
-		cfg.saveSettings();
 
-		// Обновляем модель дерева категорий
-		if (categoriesModel && categoryTree) {
-			categoriesModel->setRootPath(cfg.targetRoot);
-			categoryTree->setRootIndex(categoriesModel->index(cfg.targetRoot));
-		}
+	QMenu *helpMenu = menuBar()->addMenu("&Help");
 
-		updateTargetLabel();
-	}
+	QAction *aboutAction = helpMenu->addAction("&About");
+	connect(aboutAction, &QAction::triggered, this, [this]() {
+		QMessageBox::about(this, "Media Browser",
+			"Media sorting tool\n"
+			"Version 1.0\n\n"
+			"Left panel: Target categories\n"
+			"Center: Current folder previews\n"
+			"Click MOVE to move current folder to selected category");
+	});
 }
 
 void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
@@ -347,11 +222,6 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 	// Обновляем статус
 	if (statusBar()) {
 		statusBar()->showMessage(QString("Loading %1 files...").arg(currentFiles.size()));
-	}
-		
-	// Активируем кнопку перемещения
-	if (moveButton) {
-		moveButton->setEnabled(true);
 	}
 
 	// Запускаем загрузку превью
@@ -520,14 +390,7 @@ void MediaBrowser::loadNextUnprocessedFolder()
 	if (nextFolder.isEmpty()) {
 		// Нет папок для обработки
 		qDebug() << "No folders to process in source root:" << cfg.sourceRoot;
-
-		// Обновляем UI
-		if (labSrc) {
-			labSrc->setText(tr("No more folders to process"));
-		}
-		if (moveButton) {
-			moveButton->setEnabled(false);
-		}
+				
 		if (statusBar()) {
 			statusBar()->showMessage(tr("All folders processed"), 3000);
 		}
@@ -579,7 +442,7 @@ void MediaBrowser::moveCurrentFolder()
 
 	// Очищаем и загружаем следующую папку
 	previewArea->clearThumbnails();
-	moveButton->setEnabled(false);
+	
 
 	// Ищем следующую папку в исходной директории
 	QDir sourceDir(cfg.sourceRoot);
@@ -595,3 +458,80 @@ void MediaBrowser::moveCurrentFolder()
 			"Все папки в исходной директории обработаны.");
 	}
 }
+
+// Обработчик перемещения
+void MediaBrowser::onMoveRequested(const QString& targetCategory)
+{
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder to move");
+		return;
+	}
+
+	// Получаем имя текущей папки
+	QString folderName = QFileInfo(currentFolder).fileName();
+	QString targetPath = QDir(targetCategory).absoluteFilePath(folderName);
+
+	// Проверяем существование
+	if (QDir(targetPath).exists()) {
+		QMessageBox::StandardButton reply = QMessageBox::question(
+			this, "Confirm",
+			QString("Folder '%1' already exists in target location.\nOverwrite?").arg(folderName),
+			QMessageBox::Yes | QMessageBox::No
+		);
+
+		if (reply == QMessageBox::No) return;
+	}
+
+	// Перемещаем папку
+	QDir dir;
+	if (dir.rename(currentFolder, targetPath)) {
+		statusBar()->showMessage(QString("Moved to: %1").arg(targetPath), 5000);
+		loadNextUnprocessedFolder(); // Загружаем следующую папку
+	}
+	else {
+		QMessageBox::warning(this, "Error",
+			QString("Failed to move folder.\nFrom: %1\nTo: %2").arg(currentFolder).arg(targetPath));
+	}
+}
+
+// Обновление целевого корня
+void MediaBrowser::onTargetRootChanged(const QString& newPath)
+{
+	cfg.targetRoot = newPath;
+	cfg.saveSettings();
+}
+
+// Выбор исходного корня (через меню)
+void MediaBrowser::onSelectSourceRoot()
+{
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Select Source Root Folder",
+		cfg.sourceRoot.isEmpty() ? QDir::homePath() : cfg.sourceRoot
+	);
+
+	if (!folder.isEmpty()) {
+		cfg.sourceRoot = folder;
+		cfg.saveSettings();
+		loadNextUnprocessedFolder(); // Начинаем обработку с новой папки
+	}
+}
+
+// Выбор целевого корня 
+void MediaBrowser::onSelectTargetRoot()
+{
+	// MediaBrowser сам обрабатывает выбор папки
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Select Target Root Folder",
+		cfg.targetRoot.isEmpty() ? QDir::homePath() : cfg.targetRoot
+	);
+
+	if (!folder.isEmpty()) {
+		cfg.targetRoot = folder;
+		cfg.saveSettings();
+		categoriesPanel->setTargetRoot(folder);  // Передаем в панель
+	}
+}
+
+

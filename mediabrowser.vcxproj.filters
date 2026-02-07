@@ -52,6 +52,9 @@
     <ClCompile Include="previewarea.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="categoriespanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="ThumbnailLoader.h">
@@ -61,6 +64,9 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="previewarea.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="categoriespanel.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>
