@@ -94,6 +94,8 @@
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Filename).moc</QtMocFileName>
     </ClCompile>
     <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="tagmanager.cpp" />
+    <ClCompile Include="tagspanel.cpp" />
     <ClCompile Include="ThumbnailLoader.cpp" />
     <ClCompile Include="thumbnailwidget.cpp" />
     <QtRcc Include="mediabrowser.qrc" />
@@ -105,6 +107,8 @@
     <QtMoc Include="ThumbnailLoader.h" />
   </ItemGroup>
   <ItemGroup>
+    <QtMoc Include="tagmanager.h" />
+    <QtMoc Include="tagspanel.h" />
     <QtMoc Include="categoriespanel.h" />
     <ClInclude Include="FFmpegThumbnailer.h" />
     <QtMoc Include="previewarea.h" />

@@ -55,6 +55,12 @@
     <ClCompile Include="categoriespanel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="tagspanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tagmanager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="ThumbnailLoader.h">
@@ -67,6 +73,12 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="categoriespanel.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="tagspanel.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="tagmanager.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>

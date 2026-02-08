@@ -20,6 +20,8 @@
 #include "ThumbnailWidget.h"
 #include "previewarea.h"
 #include "categoriespanel.h"
+#include "tagspanel.h"
+#include "tagmanager.h"
 
 class ThumbnailLoader;
 
@@ -44,9 +46,11 @@ private slots:
 	void onSelectionCleared();
 
 	// Слоты для категорий
-	void onMoveRequested(const QString& targetCategory);
+	void onMoveClicked(const QString& targetCategory);	
 	
-	void onTargetRootChanged(const QString& newPath);
+	// Слоты для тегов
+	void onTagToggled(const QString& tag, bool checked);
+	void onAddTagClicked(const QString& newTag);
 
 	// Слоты меню
 	void onSelectSourceRoot();
@@ -55,6 +59,7 @@ private slots:
 private:
 	void initPreviewArea();
 	void initSidebar();
+	void initTagsbar();
 	void initMenu();
 
 	void moveCurrentFolder();
@@ -65,16 +70,24 @@ private:
 
 	void openFile(int index);
 
+	void updateTagsPanel();
+	void updateObjectTags(const QSet<QString>& newTags);
+
 	// Настройки
 	Settings cfg;
 
 	// UI элементы 
 	PreviewArea *previewArea;
 	CategoriesPanel *categoriesPanel;
+	TagsPanel *tagsPanel;
+
+	// Менеджер тегов
+	TagManager *tagManager;
 
 	// Данные текущей папки
 	QString currentFolder;          // Текущая просматриваемая папка
 	QVector<QString> currentFiles;  // Файлы в текущей папке
+	QSet<int> selectedFileIndices;	// Выбранные файлы
 	
 	 // Загрузчик превью
 	ThumbnailLoader *thumbnailLoader;

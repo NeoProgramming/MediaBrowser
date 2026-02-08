@@ -18,6 +18,7 @@
 MediaBrowser::MediaBrowser(QWidget *parent)
     : QMainWindow(parent)
 	, categoriesPanel(nullptr)
+	, tagsPanel(nullptr)
 	, previewArea(nullptr)
 	, thumbnailLoader(nullptr)
 	, loaderThread(nullptr)
@@ -25,9 +26,16 @@ MediaBrowser::MediaBrowser(QWidget *parent)
 	// Загружаем настройки
 	cfg.loadSettings();
 
+	// Инициализируем менеджер тегов
+	tagManager = new TagManager(this);
+	if (!cfg.tagsPath.isEmpty()) {
+		tagManager->loadTags(cfg.tagsPath);
+	}
+
 	// Инициализируем UI компоненты
 	initPreviewArea();
 	initSidebar();
+	initTagsbar();
 	initMenu();
 
 	resize(1200, 800);
@@ -100,11 +108,24 @@ void MediaBrowser::initSidebar()
 
 	// Подключаем сигналы от панели категорий
 	connect(categoriesPanel, &CategoriesPanel::moveRequested,
-		this, &MediaBrowser::onMoveRequested);
+		this, &MediaBrowser::onMoveClicked);
 	
 	// Подключаем сигналы кнопок (функции будут реализованы позже)
 	// connect(newCategoryButton, &QPushButton::clicked, this, &MediaBrowser::createNewCategory);
 	// connect(moveButton, &QPushButton::clicked, this, &MediaBrowser::moveCurrentFolder);
+}
+
+void MediaBrowser::initTagsbar()
+{
+	// Создаем панель тегов (справа)
+	tagsPanel = new TagsPanel(this);
+	addDockWidget(Qt::RightDockWidgetArea, tagsPanel);
+
+	// Подключаем сигналы от панели тегов
+	connect(tagsPanel, &TagsPanel::tagToggled,
+		this, &MediaBrowser::onTagToggled);
+	connect(tagsPanel, &TagsPanel::addTagClicked,
+		this, &MediaBrowser::onAddTagClicked);
 }
 
 void MediaBrowser::initMenu()
@@ -235,7 +256,10 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 
 void MediaBrowser::onSelectionChanged(const QSet<int>& selectedIndices)
 {
-	// Обновляем статус или передаем в будущую панель тегов
+	// Обновляем статус или передаем в панель тегов
+
+	selectedFileIndices = selectedIndices;
+
 	QString message;
 	if (selectedIndices.isEmpty()) {
 		message = "No selection";
@@ -252,26 +276,51 @@ void MediaBrowser::onSelectionChanged(const QSet<int>& selectedIndices)
 
 	statusBar()->showMessage(message);
 
-	// TODO: Когда появится TagsPanel
-	// if (tagsPanel) {
-	//     QStringList selectedFiles;
-	//     for (int index : selectedIndices) {
-	//         if (index < currentFiles.size()) {
-	//             selectedFiles.append(QDir(currentFolder).absoluteFilePath(currentFiles[index]));
-	//         }
-	//     }
-	//     tagsPanel->onFileSelectionChanged(selectedIndices, selectedFiles);
-	// }
+	updateTagsPanel();
 }
 
 void MediaBrowser::onSelectionCleared()
 {
+	selectedFileIndices.clear();
+
 	statusBar()->showMessage("Selection cleared", 2000);
 
-	// TODO: Когда появится TagsPanel
-	// if (tagsPanel) {
-	//     tagsPanel->onFileSelectionChanged(QSet<int>(), QStringList());
-	// }
+	updateTagsPanel();
+}
+
+void MediaBrowser::updateTagsPanel()
+{
+	if (selectedFileIndices.isEmpty()) {
+		// Если ничего не выбрано - показываем теги текущей папки
+		QSet<QString> folderTags = tagManager->getObjectTags(currentFolder);
+		tagsPanel->setObjectTags(folderTags);
+		tagsPanel->setObjectName(QFileInfo(currentFolder).fileName());
+	}
+	else if (selectedFileIndices.size() == 1) {
+		// Если выбран один файл
+		int index = *selectedFileIndices.begin();
+		if (index < currentFiles.size()) {
+			QString filePath = QDir(currentFolder).absoluteFilePath(currentFiles[index]);
+			QSet<QString> fileTags = tagManager->getObjectTags(filePath);
+			tagsPanel->setObjectTags(fileTags);
+			tagsPanel->setObjectName(currentFiles[index]);
+		}
+	}
+	else {
+		// Если выбрано несколько файлов - объединение тегов
+		QSet<QString> allFileTags;
+		for (int index : selectedFileIndices) {
+			if (index < currentFiles.size()) {
+				QString filePath = QDir(currentFolder).absoluteFilePath(currentFiles[index]);
+				allFileTags.unite(tagManager->getObjectTags(filePath));
+			}
+		}
+		tagsPanel->setObjectTags(allFileTags);
+		tagsPanel->setObjectName(QString("%1 files").arg(selectedFileIndices.size()));
+	}
+
+	// Устанавливаем все доступные теги
+	tagsPanel->setAllTags(tagManager->getAllTags());
 }
 
 void MediaBrowser::onThumbnailsFinished()
@@ -399,6 +448,10 @@ void MediaBrowser::loadNextUnprocessedFolder()
 
 	// Загружаем превью для найденной папки
 	loadFolderThumbnails(nextFolder);
+
+	// Загружаем теги
+	selectedFileIndices.clear();
+	updateTagsPanel();
 }
 
 void MediaBrowser::moveCurrentFolder()
@@ -460,7 +513,7 @@ void MediaBrowser::moveCurrentFolder()
 }
 
 // Обработчик перемещения
-void MediaBrowser::onMoveRequested(const QString& targetCategory)
+void MediaBrowser::onMoveClicked(const QString& targetCategory)
 {
 	if (currentFolder.isEmpty()) {
 		QMessageBox::warning(this, "Error", "No current folder to move");
@@ -494,13 +547,6 @@ void MediaBrowser::onMoveRequested(const QString& targetCategory)
 	}
 }
 
-// Обновление целевого корня
-void MediaBrowser::onTargetRootChanged(const QString& newPath)
-{
-	cfg.targetRoot = newPath;
-	cfg.saveSettings();
-}
-
 // Выбор исходного корня (через меню)
 void MediaBrowser::onSelectSourceRoot()
 {
@@ -532,6 +578,59 @@ void MediaBrowser::onSelectTargetRoot()
 		cfg.saveSettings();
 		categoriesPanel->setTargetRoot(folder);  // Передаем в панель
 	}
+}
+
+// Обработка изменения тега
+void MediaBrowser::onTagToggled(const QString& tag, bool checked)
+{
+	Q_UNUSED(tag);
+	Q_UNUSED(checked);
+
+	// Для текущего контекста (файл, папка или несколько файлов)
+	// применяем изменение тега
+	updateObjectTags(tagsPanel->getSelectedTags());
+}
+
+// Добавление нового тега
+void MediaBrowser::onAddTagClicked(const QString& newTag)
+{
+	if (newTag.isEmpty()) return;
+
+	// Добавляем тег в общий список
+	tagManager->addGlobalTag(newTag);
+
+	// Получаем текущие теги
+	QSet<QString> currentTags = tagsPanel->getSelectedTags();
+	currentTags.insert(newTag);
+
+	// Обновляем
+	updateObjectTags(currentTags);
+
+	// Очищаем поле ввода
+	tagsPanel->clearInput();
+}
+
+// Обновление тегов объекта
+void MediaBrowser::updateObjectTags(const QSet<QString>& newTags)
+{
+	if (selectedFileIndices.isEmpty()) {
+		// Для текущей папки
+		if (!currentFolder.isEmpty()) {
+			tagManager->setObjectTags(currentFolder, newTags);
+		}
+	}
+	else {
+		// Для выбранных файлов
+		for (int index : selectedFileIndices) {
+			if (index < currentFiles.size()) {
+				QString filePath = QDir(currentFolder).absoluteFilePath(currentFiles[index]);
+				tagManager->setObjectTags(filePath, newTags);
+			}
+		}
+	}
+
+	// Обновляем список всех тегов
+	tagsPanel->setAllTags(tagManager->getAllTags());
 }
 
 
