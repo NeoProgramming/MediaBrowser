@@ -118,6 +118,8 @@ void TagsPanel::createTagCheckboxes()
 {
 	// Удаляем старые чекбоксы
 	for (QCheckBox *checkbox : m_tagCheckboxes) {
+		disconnect(checkbox, &QCheckBox::toggled,
+			this, &TagsPanel::onTagCheckboxToggled);
 		delete checkbox;
 	}
 	m_tagCheckboxes.clear();
