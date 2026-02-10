@@ -12,7 +12,8 @@ CategoriesPanel::CategoriesPanel(QWidget *parent)
 	, m_labDst(nullptr)
 	, m_categoryTree(nullptr)
 	, m_categoriesModel(nullptr)
-	, m_moveButton(nullptr)
+	, m_moveSelectedButton(nullptr)
+	, m_moveAllButton(nullptr)
 	, m_newCategoryButton(nullptr)
 {
 	setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
@@ -23,7 +24,8 @@ CategoriesPanel::CategoriesPanel(QWidget *parent)
 
 	// Создаем UI элементы
 	m_labDst = new QLabel("Dst: <NOT SELECTED>");
-	m_moveButton = new QPushButton("MOVE");
+	m_moveSelectedButton = new QPushButton("Move Selected Files");
+	m_moveAllButton = new QPushButton("Move All Folder");
 	m_categoryTree = new QTreeView();
 	m_newCategoryButton = new QPushButton("New theme");
 
@@ -50,7 +52,8 @@ CategoriesPanel::CategoriesPanel(QWidget *parent)
 	m_categoryTree->setStyleSheet(styleSheet);
 
 	// Размещаем элементы
-	mainLayout->addWidget(m_moveButton);
+	mainLayout->addWidget(m_moveSelectedButton);
+	mainLayout->addWidget(m_moveAllButton);
 	mainLayout->addWidget(m_labDst);
 	mainLayout->addWidget(m_categoryTree, 1); // Растягиваем дерево
 	mainLayout->addWidget(m_newCategoryButton);
@@ -65,8 +68,10 @@ CategoriesPanel::CategoriesPanel(QWidget *parent)
 		QDockWidget::DockWidgetClosable);
 
 	// Подключаем сигналы
-	connect(m_moveButton, &QPushButton::clicked,
-		this, &CategoriesPanel::onMoveClicked);
+	connect(m_moveSelectedButton, &QPushButton::clicked,
+		this, &CategoriesPanel::onMoveSelectedClicked);
+	connect(m_moveAllButton, &QPushButton::clicked,
+		this, &CategoriesPanel::onMoveAllClicked);
 	connect(m_newCategoryButton, &QPushButton::clicked,
 		this, &CategoriesPanel::onNewCategoryClicked);
 	connect(m_categoryTree->selectionModel(), &QItemSelectionModel::selectionChanged,
@@ -136,7 +141,8 @@ void CategoriesPanel::refreshTree()
 	}
 }
 
-void CategoriesPanel::onMoveClicked()
+// Обновляем слоты
+void CategoriesPanel::onMoveSelectedClicked()
 {
 	QString targetCategory = getCurrentCategory();
 	if (targetCategory.isEmpty()) {
@@ -144,7 +150,18 @@ void CategoriesPanel::onMoveClicked()
 		return;
 	}
 
-	emit moveRequested(targetCategory);
+	emit moveSelectedRequested(targetCategory);
+}
+
+void CategoriesPanel::onMoveAllClicked()
+{
+	QString targetCategory = getCurrentCategory();
+	if (targetCategory.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No target category selected");
+		return;
+	}
+
+	emit moveAllRequested(targetCategory);
 }
 
 void CategoriesPanel::onNewCategoryClicked()

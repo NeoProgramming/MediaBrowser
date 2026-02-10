@@ -17,6 +17,7 @@ TagsPanel::TagsPanel(QWidget *parent)
 	, m_tagsContainer(nullptr)
 	, m_newTagEdit(nullptr)
 	, m_addButton(nullptr)
+	, m_needsRefresh(false)
 {
 	setAllowedAreas(Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea);
 
@@ -25,7 +26,11 @@ TagsPanel::TagsPanel(QWidget *parent)
 	QVBoxLayout *mainLayout = new QVBoxLayout(mainWidget);
 
 	// Заголовок
-	m_titleLabel = new QLabel("Tags: No object selected");
+	m_titleLabel = new QLabel("No object selected");
+	m_titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+	m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred); // Растягивается по горизонтали
+	m_titleLabel->setWordWrap(false); // Запрещаем перенос слов
+	m_titleLabel->setMinimumHeight(30); // Фиксированная высота
 	mainLayout->addWidget(m_titleLabel);
 
 	// Область с тегами и прокруткой
@@ -71,15 +76,99 @@ TagsPanel::~TagsPanel()
 
 void TagsPanel::setObjectTags(const QSet<QString>& objectTags)
 {
-	m_objectTags = objectTags;
-	createTagCheckboxes();
-	updateTitle();
+//	m_objectTags = objectTags;
+//	createTagCheckboxes();
+//	updateTitle();
+	updateObjectTagsData(objectTags);
 }
 
 void TagsPanel::setAllTags(const QSet<QString>& allTags)
 {
+//	m_allTags = allTags;
+//	createTagCheckboxes();
+	updateAllTagsData(allTags);
+}
+
+void TagsPanel::updateObjectTagsData(const QSet<QString>& objectTags)
+{
+	m_objectTags = objectTags;
+	m_needsRefresh = true;
+
+	// Откладываем обновление на следующий цикл событий
+	QTimer::singleShot(0, this, &TagsPanel::refreshTags);
+}
+
+void TagsPanel::updateAllTagsData(const QSet<QString>& allTags)
+{
 	m_allTags = allTags;
-	createTagCheckboxes();
+	m_needsRefresh = true;
+
+	// Откладываем обновление на следующий цикл событий
+	QTimer::singleShot(0, this, &TagsPanel::refreshTags);
+}
+
+void TagsPanel::refreshTags()
+{
+	if (!m_needsRefresh) {
+		return;
+	}
+
+	m_needsRefresh = false;
+
+	qDebug() << "TagsPanel::refreshTags - object tags:" << m_objectTags.size()
+		<< "all tags:" << m_allTags.size();
+
+	// Очищаем старые чекбоксы
+	for (QCheckBox *checkbox : m_tagCheckboxes) {
+		if (checkbox) {
+			checkbox->blockSignals(true);
+			delete checkbox;
+		}
+	}
+	m_tagCheckboxes.clear();
+
+	if (!m_tagsContainer) {
+		return;
+	}
+
+	// Объединяем все теги: теги объекта + все теги системы
+	QSet<QString> allTagsToShow = m_allTags.unite(m_objectTags);
+
+	if (allTagsToShow.isEmpty()) {
+		m_tagsContainer->setMinimumHeight(0);
+		return;
+	}
+
+	// Разделяем на отмеченные (из объекта) и неотмеченные
+	QSet<QString> checkedTags = m_objectTags;
+	QSet<QString> uncheckedTags = allTagsToShow.subtract(m_objectTags);
+
+	// Преобразуем в списки и сортируем
+	QStringList checkedTagsSorted = checkedTags.values();
+	QStringList uncheckedTagsSorted = uncheckedTags.values();
+
+	std::sort(checkedTagsSorted.begin(), checkedTagsSorted.end(),
+		[](const QString &a, const QString &b) {
+		return a.toLower() < b.toLower();
+	});
+
+	std::sort(uncheckedTagsSorted.begin(), uncheckedTagsSorted.end(),
+		[](const QString &a, const QString &b) {
+		return a.toLower() < b.toLower();
+	});
+
+	// Создаем чекбоксы в правильном порядке
+	for (const QString &tag : checkedTagsSorted) {
+		createTagCheckbox(tag, true);
+	}
+
+	for (const QString &tag : uncheckedTagsSorted) {
+		createTagCheckbox(tag, false);
+	}
+
+	// Перераспределяем теги
+	rearrangeTags();
+	updateTitle();
 }
 
 void TagsPanel::setObjectName(const QString& name)
@@ -104,14 +193,46 @@ QString TagsPanel::getNewTagText() const
 	return m_newTagEdit->text().trimmed();
 }
 
-void TagsPanel::refreshTags()
-{
-	createTagCheckboxes();
-}
-
 void TagsPanel::clearInput()
 {
 	m_newTagEdit->clear();
+}
+
+void TagsPanel::createTagCheckbox(const QString& tag, bool checked)
+{
+	if (m_tagCheckboxes.contains(tag)) {
+		return; // Уже существует
+	}
+
+	QCheckBox *checkbox = new QCheckBox(tag, m_tagsContainer);
+	checkbox->setChecked(checked);
+	checkbox->setVisible(true);
+	// Настраиваем стиль в зависимости от состояния
+	QString backgroundColor = checked ? "#e3f2fd" : "#f5f5f5";
+	QString borderColor = checked ? "#bbdefb" : "#e0e0e0";
+	QString hoverColor = checked ? "#bbdefb" : "#eeeeee";
+
+	checkbox->setStyleSheet(QString(
+		"QCheckBox {"
+		"    padding: 4px 8px;"
+		"    margin: 2px;"
+		"    border-radius: 4px;"
+		"    background-color: %1;"
+		"    border: 1px solid %2;"
+		"}"
+		"QCheckBox:hover {"
+		"    background-color: %3;"
+		"}"
+		"QCheckBox::indicator {"
+		"    width: 16px;"
+		"    height: 16px;"
+		"}"
+	).arg(backgroundColor, borderColor, hoverColor));
+
+	connect(checkbox, &QCheckBox::toggled,
+		this, &TagsPanel::onTagCheckboxToggled);
+
+	m_tagCheckboxes[tag] = checkbox;
 }
 
 void TagsPanel::createTagCheckboxes()
@@ -206,17 +327,38 @@ void TagsPanel::rearrangeTags()
 {
 	if (m_tagCheckboxes.isEmpty() || !m_tagsContainer)
 		return;
+	
 
 	// Рассчитываем доступную ширину (с отступами)
-	int containerWidth = m_tagsContainer->width() - 20; // 10px отступ с каждой стороны
+	int containerWidth = m_tagsContainer->width();
+	if (containerWidth <= 0)
+		return;
+
+	int availableWidth = containerWidth - 20; // 10px отступ с каждой стороны
 	int currentX = 10;  // Начинаем слева с отступа
 	int currentY = 10;  // Начинаем сверху с отступа
 	int rowHeight = 0;
 	int hSpacing = 4;   // Горизонтальный отступ между тегами
 	int vSpacing = 4;   // Вертикальный отступ между строками
 
+	// Разделяем теги на отмеченные и неотмеченные
+	QMap<QString, QCheckBox*> checkedBoxes;
+	QMap<QString, QCheckBox*> uncheckedBoxes;
+
+	for (auto it = m_tagCheckboxes.constBegin(); it != m_tagCheckboxes.constEnd(); ++it) {
+		if (!it.value()) continue;
+
+		if (it.value()->isChecked()) {
+			checkedBoxes[it.key()] = it.value();
+		}
+		else {
+			uncheckedBoxes[it.key()] = it.value();
+		}
+	}
+
 	
 	// Располагаем теги слева направо, сверху вниз
+	/*
 	for (auto it = m_tagCheckboxes.constBegin(); it != m_tagCheckboxes.constEnd(); ++it) {
 		QCheckBox* checkbox = it.value();
 
@@ -238,7 +380,48 @@ void TagsPanel::rearrangeTags()
 		// Обновляем позицию для следующего тега
 		currentX += size.width() + hSpacing;
 		rowHeight = qMax(rowHeight, size.height());
+	}*/
+
+	// Функция для размещения группы тегов
+	auto layoutGroup = [&](QMap<QString, QCheckBox*>& group) {
+		for (auto it = group.constBegin(); it != group.constEnd(); ++it) {
+			QCheckBox* checkbox = it.value();
+			if (!checkbox) continue;
+
+			checkbox->adjustSize();
+			QSize size = checkbox->sizeHint();
+
+			// Обработка очень длинных тегов
+			if (size.width() > availableWidth - 20) {
+				size.setWidth(availableWidth - 20);
+				checkbox->setFixedWidth(size.width());
+			}
+
+			// Если тег не помещается в текущую строку
+			if (currentX + size.width() > availableWidth && currentX > 10) {
+				currentX = 10;
+				currentY += rowHeight + vSpacing;
+				rowHeight = 0;
+			}
+
+			checkbox->setGeometry(QRect(currentX, currentY, size.width(), size.height()));
+			currentX += size.width() + hSpacing;
+			rowHeight = qMax(rowHeight, size.height());
+		}
+	};
+
+	// Сначала размещаем отмеченные теги
+	layoutGroup(checkedBoxes);
+
+	// Добавляем отступ между группами
+	if (!checkedBoxes.isEmpty() && !uncheckedBoxes.isEmpty()) {
+		currentX = 10;
+		currentY += rowHeight + vSpacing * 2;
+		rowHeight = 0;
 	}
+
+	// Затем размещаем неотмеченные теги
+	layoutGroup(uncheckedBoxes);
 
 	// Обновляем высоту контейнера
 	int totalHeight = currentY + rowHeight + 10;
@@ -249,27 +432,72 @@ void TagsPanel::rearrangeTags()
 void TagsPanel::resizeEvent(QResizeEvent *event)
 {
 	QDockWidget::resizeEvent(event);
-
-	// Небольшая задержка, чтобы убедиться, что размеры обновились
-	QTimer::singleShot(10, this, [this]() {
-		if (!m_tagCheckboxes.isEmpty()) {
-			rearrangeTags();
-		}
-	});
+	
+	QTimer::singleShot(0, this, &TagsPanel::updateTitle);
+	
+	QTimer::singleShot(0, this, &TagsPanel::rearrangeTags);
 }
 
 void TagsPanel::updateTitle()
 {
-	QString title = "Tags";
+	QString title;
+	QString styleSheet = ""; // По умолчанию
+
+//	if (!m_objectTags.isEmpty()) {
+//		title += QString("%1: ").arg(m_objectTags.size());
+//	}
+
 	if (!m_objectName.isEmpty()) {
-		title += QString(": %1").arg(m_objectName);
-	}
+		// Определяем, это файл или папка (по наличию расширения)
+		bool isFile = m_objectName.contains('.') &&
+			!m_objectName.endsWith('.') &&
+			!m_objectName.startsWith('.');
 
-	if (!m_objectTags.isEmpty()) {
-		title += QString(" (%1 tags)").arg(m_objectTags.size());
+		if (isFile) {
+			// Стиль для файла
+			styleSheet = "QLabel {"
+				"    color: #1976D2;"      // Темно-синий
+				"    font-weight: bold;"
+				"    background-color: #E3F2FD;"  // Светло-голубой фон
+				"    padding: 4px 8px;"
+				"    border-radius: 4px;"
+				"    border: 1px solid #90CAF9;"
+				"}";
+			title += QString("%1").arg(m_objectName);
+		}
+		else {
+			// Стиль для папки
+			styleSheet = "QLabel {"
+				"    color: #388E3C;"      // Темно-зеленый
+				"    font-weight: bold;"
+				"    background-color: #E8F5E9;"  // Светло-зеленый фон
+				"    padding: 4px 8px;"
+				"    border-radius: 4px;"
+				"    border: 1px solid #A5D6A7;"
+				"}";
+			title += QString("%1").arg(m_objectName);
+		}
 	}
+	else {
+		// Без объекта
+		styleSheet = "QLabel {"
+			"    color: #757575;"      // Серый
+			"    font-style: italic;"
+			"}";
+		title += ": No object selected";
+	}	
 
+	// Устанавливаем текст и стиль
 	m_titleLabel->setText(title);
+	m_titleLabel->setStyleSheet(styleSheet);
+
+	// Обрезаем длинный текст с многоточием
+	QFontMetrics metrics(m_titleLabel->font());
+	int labelWidth = m_titleLabel->width() - 16; // Учитываем padding
+	QString elidedText = metrics.elidedText(title, Qt::ElideRight, labelWidth);
+	m_titleLabel->setText(elidedText);
+	m_titleLabel->setToolTip(title); // Полный текст в tooltip
+
 }
 
 void TagsPanel::onAddTagClicked()
@@ -296,7 +524,7 @@ void TagsPanel::onTagCheckboxToggled(bool checked)
 	if (!checkbox) return;
 
 	QString tag = checkbox->text();
-	emit tagToggled(tag, checked);
+//	emit tagToggled(tag, checked);
 
 	// Обновляем внутренние данные
 	if (checked) {
@@ -306,8 +534,34 @@ void TagsPanel::onTagCheckboxToggled(bool checked)
 		m_objectTags.remove(tag);
 	}
 
-	// Отправляем сигнал об изменении всех тегов
+	// Обновляем стиль
+	QString backgroundColor = checked ? "#e3f2fd" : "#f5f5f5";
+	QString borderColor = checked ? "#bbdefb" : "#e0e0e0";
+	QString hoverColor = checked ? "#bbdefb" : "#eeeeee";
+
+	checkbox->setStyleSheet(QString(
+		"QCheckBox {"
+		"    padding: 4px 8px;"
+		"    margin: 2px;"
+		"    border-radius: 4px;"
+		"    background-color: %1;"
+		"    border: 1px solid %2;"
+		"}"
+		"QCheckBox:hover {"
+		"    background-color: %3;"
+		"}"
+		"QCheckBox::indicator {"
+		"    width: 16px;"
+		"    height: 16px;"
+		"}"
+	).arg(backgroundColor, borderColor, hoverColor));
+
+	// Отправляем сигналы
+	emit tagToggled(tag, checked);
 	emit tagsChanged(getSelectedTags());
 
 	updateTitle();
+
+	// Теперь просто меняем порядок отображения без пересоздания
+	QTimer::singleShot(0, this, &TagsPanel::rearrangeTags);
 }

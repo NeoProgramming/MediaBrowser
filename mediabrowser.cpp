@@ -107,12 +107,10 @@ void MediaBrowser::initSidebar()
 	addDockWidget(Qt::LeftDockWidgetArea, categoriesPanel);
 
 	// Подключаем сигналы от панели категорий
-	connect(categoriesPanel, &CategoriesPanel::moveRequested,
-		this, &MediaBrowser::onMoveClicked);
-	
-	// Подключаем сигналы кнопок (функции будут реализованы позже)
-	// connect(newCategoryButton, &QPushButton::clicked, this, &MediaBrowser::createNewCategory);
-	// connect(moveButton, &QPushButton::clicked, this, &MediaBrowser::moveCurrentFolder);
+	connect(categoriesPanel, &CategoriesPanel::moveSelectedRequested,
+		this, &MediaBrowser::onMoveSelectedClicked);
+	connect(categoriesPanel, &CategoriesPanel::moveAllRequested,
+		this, &MediaBrowser::onMoveAllClicked);
 }
 
 void MediaBrowser::initTagsbar()
@@ -454,6 +452,7 @@ void MediaBrowser::loadNextUnprocessedFolder()
 	updateTagsPanel();
 }
 
+/*
 void MediaBrowser::moveCurrentFolder()
 {
 	if (currentFolder.isEmpty()) {
@@ -511,8 +510,170 @@ void MediaBrowser::moveCurrentFolder()
 			"Все папки в исходной директории обработаны.");
 	}
 }
-
+*/
 // Обработчик перемещения
+
+// Переименовываем старый слот и добавляем новый
+void MediaBrowser::onMoveSelectedClicked(const QString& targetCategory)
+{
+	if (selectedFileIndices.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No files selected");
+		return;
+	}
+
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder");
+		return;
+	}
+
+	// Перемещаем только выбранные файлы
+	moveSelectedFiles(targetCategory);
+}
+
+void MediaBrowser::onMoveAllClicked(const QString& targetCategory)
+{
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder to move");
+		return;
+	}
+
+	// Перемещаем всю папку
+	moveCurrentFolder(targetCategory);
+}
+
+// Новая функция для перемещения выбранных файлов
+void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
+{
+	qDebug() << "Moving selected files to:" << targetCategory;
+
+	// Получаем имена выбранных файлов
+	QStringList selectedFiles;
+	for (int index : selectedFileIndices) {
+		if (index < currentFiles.size()) {
+			selectedFiles.append(currentFiles[index]);
+		}
+	}
+
+	if (selectedFiles.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No valid files selected");
+		return;
+	}
+
+	// Перемещаем каждый файл
+	int movedCount = 0;
+	QDir sourceDir(currentFolder);
+	QDir targetDir(targetCategory);
+
+	for (const QString &filename : selectedFiles) {
+		QString sourcePath = sourceDir.absoluteFilePath(filename);
+		QString targetPath = targetDir.absoluteFilePath(filename);
+
+		// Проверяем, существует ли уже файл в целевой папке
+		if (QFile::exists(targetPath)) {
+			int result = QMessageBox::question(this, "Confirm Overwrite",
+				QString("File '%1' already exists in target folder.\nOverwrite?").arg(filename),
+				QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+
+			if (result == QMessageBox::No) {
+				continue; // Пропускаем этот файл
+			}
+			else if (result == QMessageBox::Cancel) {
+				break; // Отменяем операцию
+			}
+		}
+
+		// Перемещаем файл
+		if (QFile::rename(sourcePath, targetPath)) {
+			movedCount++;
+
+			// Также перемещаем .tags файл если он существует
+			QString tagsSourcePath = sourcePath + ".tags";
+			QString tagsTargetPath = targetPath + ".tags";
+			if (QFile::exists(tagsSourcePath)) {
+				QFile::rename(tagsSourcePath, tagsTargetPath);
+			}
+
+			// Удаляем из текущего списка файлов
+			currentFiles.removeAll(filename);
+		}
+		else {
+			QMessageBox::warning(this, "Error",
+				QString("Failed to move file:\n%1").arg(filename));
+		}
+	}
+
+	// Обновляем отображение
+	if (movedCount > 0) {
+		statusBar()->showMessage(QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory), 5000);
+
+		// Обновляем превью
+	//	previewArea->setThumbnailCount(currentFiles.size());
+		// Обновляем теги
+	//	selectedFileIndices.clear();
+	//	updateTagsPanel();
+
+		// ВАЖНО: Не просто обновляем количество превью, а перезагружаем всю папку
+		// Сначала очищаем выбранные файлы
+		selectedFileIndices.clear();
+
+		// Затем перезагружаем текущую папку, чтобы обновить список файлов
+		if (!currentFolder.isEmpty()) {
+			loadFolderThumbnails(currentFolder);
+		}
+
+		// Обновляем теги
+		updateTagsPanel();
+	}
+}
+
+// Обновляем старую функцию moveCurrentFolder
+void MediaBrowser::moveCurrentFolder(const QString& targetCategory)
+{
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder to move");
+		return;
+	}
+
+	// Получаем имя папки
+	QString folderName = QFileInfo(currentFolder).fileName();
+	QString targetPath = QDir(targetCategory).absoluteFilePath(folderName);
+
+	// Проверяем, не существует ли уже такая папка
+	if (QDir(targetPath).exists()) {
+		int result = QMessageBox::question(this, "Confirm Overwrite",
+			QString("Folder '%1' already exists in target location.\nOverwrite?").arg(folderName),
+			QMessageBox::Yes | QMessageBox::No);
+
+		if (result == QMessageBox::No) {
+			return;
+		}
+
+		// Если перезаписываем, удаляем старую папку
+		QDir(targetPath).removeRecursively();
+	}
+
+	// Перемещаем папку
+	QDir dir;
+	if (dir.rename(currentFolder, targetPath)) {
+		statusBar()->showMessage(QString("Folder moved to: %1").arg(targetPath), 5000);
+
+		// Перемещаем теги папки если они существуют
+		QString tagsSourcePath = currentFolder + ".tags";
+		QString tagsTargetPath = targetPath + ".tags";
+		if (QFile::exists(tagsSourcePath)) {
+			QFile::rename(tagsSourcePath, tagsTargetPath);
+		}
+
+		// Загружаем следующую папку
+		loadNextUnprocessedFolder();
+	}
+	else {
+		QMessageBox::warning(this, "Error",
+			QString("Failed to move folder.\nFrom: %1\nTo: %2").arg(currentFolder).arg(targetPath));
+	}
+}
+
+/*
 void MediaBrowser::onMoveClicked(const QString& targetCategory)
 {
 	if (currentFolder.isEmpty()) {
@@ -546,7 +707,7 @@ void MediaBrowser::onMoveClicked(const QString& targetCategory)
 			QString("Failed to move folder.\nFrom: %1\nTo: %2").arg(currentFolder).arg(targetPath));
 	}
 }
-
+*/
 // Выбор исходного корня (через меню)
 void MediaBrowser::onSelectSourceRoot()
 {

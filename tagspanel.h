@@ -24,12 +24,15 @@ public:
 	void setAllTags(const QSet<QString>& allTags);
 	void setObjectName(const QString& name);
 
+	void updateObjectTagsData(const QSet<QString>& objectTags);
+	void updateAllTagsData(const QSet<QString>& allTags);
+
 	// Получение данных
 	QSet<QString> getSelectedTags() const;
 	QString getNewTagText() const;
 
 	// Обновление UI
-	void refreshTags();
+
 	void clearInput();
 
 signals:
@@ -57,10 +60,15 @@ private:
 	// Виджеты тегов
 	QMap<QString, QCheckBox*> m_tagCheckboxes;
 
+	// Флаги состояния
+	bool m_needsRefresh;
+
 	// Вспомогательные методы
+	void refreshTags();
 	void createTagCheckboxes();
 	void updateTitle();
 	void rearrangeTags(); 
+	void createTagCheckbox(const QString& tag, bool checked);
 private slots:
 	void onTagCheckboxToggled(bool checked);
 };

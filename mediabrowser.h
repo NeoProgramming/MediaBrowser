@@ -46,7 +46,8 @@ private slots:
 	void onSelectionCleared();
 
 	// Слоты для категорий
-	void onMoveClicked(const QString& targetCategory);	
+	void onMoveSelectedClicked(const QString& targetCategory);
+	void onMoveAllClicked(const QString& targetCategory);
 	
 	// Слоты для тегов
 	void onTagToggled(const QString& tag, bool checked);
@@ -62,7 +63,9 @@ private:
 	void initTagsbar();
 	void initMenu();
 
-	void moveCurrentFolder();
+	void moveSelectedFiles(const QString& targetCategory);
+	void moveCurrentFolder(const QString& targetCategory);
+
 	QString findNextUnprocessedDir();
 	void loadNextUnprocessedFolder();
 

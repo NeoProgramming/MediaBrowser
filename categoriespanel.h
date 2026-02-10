@@ -29,12 +29,14 @@ public:
 
 signals:
 	// Сигналы для внешнего мира
-	void moveRequested(const QString& targetCategory);
+	void moveSelectedRequested(const QString& targetCategory);
+	void moveAllRequested(const QString& targetCategory);
 	void newCategoryRequested(const QString& parentPath);
 	void categorySelected(const QString& categoryPath);
 
 public slots:
-	void onMoveClicked();
+	void onMoveSelectedClicked();
+	void onMoveAllClicked();
 	void onNewCategoryClicked();
 
 private:
@@ -42,7 +44,9 @@ private:
 	QLabel *m_labDst;
 	QTreeView *m_categoryTree;
 	QFileSystemModel *m_categoriesModel;
-	QPushButton *m_moveButton;
+	//QPushButton *m_moveButton;
+	QPushButton *m_moveSelectedButton;
+	QPushButton *m_moveAllButton;
 	QPushButton *m_newCategoryButton;
 
 	// Данные
