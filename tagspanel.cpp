@@ -76,21 +76,6 @@ TagsPanel::~TagsPanel()
 
 void TagsPanel::setObjectTags(const QSet<QString>& objectTags)
 {
-//	m_objectTags = objectTags;
-//	createTagCheckboxes();
-//	updateTitle();
-	updateObjectTagsData(objectTags);
-}
-
-void TagsPanel::setAllTags(const QSet<QString>& allTags)
-{
-//	m_allTags = allTags;
-//	createTagCheckboxes();
-	updateAllTagsData(allTags);
-}
-
-void TagsPanel::updateObjectTagsData(const QSet<QString>& objectTags)
-{
 	m_objectTags = objectTags;
 	m_needsRefresh = true;
 
@@ -98,7 +83,7 @@ void TagsPanel::updateObjectTagsData(const QSet<QString>& objectTags)
 	QTimer::singleShot(0, this, &TagsPanel::refreshTags);
 }
 
-void TagsPanel::updateAllTagsData(const QSet<QString>& allTags)
+void TagsPanel::setAllTags(const QSet<QString>& allTags)
 {
 	m_allTags = allTags;
 	m_needsRefresh = true;
@@ -109,10 +94,8 @@ void TagsPanel::updateAllTagsData(const QSet<QString>& allTags)
 
 void TagsPanel::refreshTags()
 {
-	if (!m_needsRefresh) {
+	if (!m_needsRefresh) 
 		return;
-	}
-
 	m_needsRefresh = false;
 
 	qDebug() << "TagsPanel::refreshTags - object tags:" << m_objectTags.size()
@@ -354,33 +337,7 @@ void TagsPanel::rearrangeTags()
 		else {
 			uncheckedBoxes[it.key()] = it.value();
 		}
-	}
-
-	
-	// Располагаем теги слева направо, сверху вниз
-	/*
-	for (auto it = m_tagCheckboxes.constBegin(); it != m_tagCheckboxes.constEnd(); ++it) {
-		QCheckBox* checkbox = it.value();
-
-		// Получаем размер тега
-		checkbox->adjustSize(); // Обновляем размер после изменения текста
-		QSize size = checkbox->sizeHint();
-
-		// Если тег не помещается в текущую строку
-		if (currentX + size.width() > containerWidth && currentX > 10) {
-			// Переходим на новую строку
-			currentX = 10;
-			currentY += rowHeight + vSpacing;
-			rowHeight = 0;
-		}
-
-		// Устанавливаем позицию и размер
-		checkbox->setGeometry(QRect(currentX, currentY, size.width(), size.height()));
-
-		// Обновляем позицию для следующего тега
-		currentX += size.width() + hSpacing;
-		rowHeight = qMax(rowHeight, size.height());
-	}*/
+	}	
 
 	// Функция для размещения группы тегов
 	auto layoutGroup = [&](QMap<QString, QCheckBox*>& group) {

@@ -56,25 +56,30 @@ private slots:
 	// Слоты меню
 	void onSelectSourceRoot();
 	void onSelectTargetRoot();
-
+	
+	void onMoveSelectedToCustomFolder();
+	void onMoveFolderToCustomFolder();
+	void onDeleteSelectedItems();
+	void onDeleteCurrentFolder();
 private:
 	void initPreviewArea();
 	void initSidebar();
 	void initTagsbar();
 	void initMenu();
-
 	void moveSelectedFiles(const QString& targetCategory);
 	void moveCurrentFolder(const QString& targetCategory);
-
 	QString findNextUnprocessedDir();
 	void loadNextUnprocessedFolder();
-
 	void loadFolderThumbnails(const QString& folderPath);
-
 	void openFile(int index);
-
 	void updateTagsPanel();
 	void updateObjectTags(const QSet<QString>& newTags);
+	void deleteFiles(const QStringList& files);
+	void deleteFolder(const QString& folderPath);
+	void reloadCurrentFolder();
+	void updateStatusBar();
+	int getTotalFilesCount(const QString& folderPath);
+	int getTotalFoldersCount(const QString& folderPath);
 
 	// Настройки
 	Settings cfg;
@@ -95,4 +100,5 @@ private:
 	 // Загрузчик превью
 	ThumbnailLoader *thumbnailLoader;
 	QThread *loaderThread;
+	QString statusLoading;
 };

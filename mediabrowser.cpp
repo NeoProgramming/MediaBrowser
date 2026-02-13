@@ -146,31 +146,23 @@ void MediaBrowser::initMenu()
 
 	// Пункт: Move selected items
 	QAction *moveSelectedAction = fileMenu->addAction(tr("Move selected items to custom folder"));
-	connect(moveSelectedAction, &QAction::triggered, this, [this]() {
-		// TODO: Реализовать перемещение выбранных элементов в произвольную папку
-		qDebug() << "Move selected items to custom folder clicked";
-	});
+	connect(moveSelectedAction, &QAction::triggered,
+		this, &MediaBrowser::onMoveSelectedToCustomFolder);
 
 	// Пункт: Move selected items
 	QAction *moveFolderAction = fileMenu->addAction(tr("Move current folder to custom folder"));
-	connect(moveFolderAction, &QAction::triggered, this, [this]() {
-		// TODO: Реализовать перемещение текущей папки в произвольную папку
-		qDebug() << "Move current folder to custom folder clicked";
-	});
-
+	connect(moveFolderAction, &QAction::triggered,
+		this, &MediaBrowser::onMoveFolderToCustomFolder);
+	
 	// Пункт: Delete selected items
 	QAction *deleteSelectedAction = fileMenu->addAction(tr("Delete selected items"));
-	connect(deleteSelectedAction, &QAction::triggered, this, [this]() {
-		// TODO: Реализовать удаление выбранных элементов
-		qDebug() << "Delete selected items clicked";
-	});
+	connect(deleteSelectedAction, &QAction::triggered,
+		this, &MediaBrowser::onDeleteSelectedItems);
 
 	// Пункт: Delete current folder
 	QAction *deleteFolderAction = fileMenu->addAction(tr("Delete current folder"));
-	connect(deleteFolderAction, &QAction::triggered, this, [this]() {
-		// TODO: Реализовать удаление текущей папки
-		qDebug() << "Delete current folder clicked";
-	});
+	connect(deleteFolderAction, &QAction::triggered,
+		this, &MediaBrowser::onDeleteCurrentFolder);
 
 	fileMenu->addSeparator();
 
@@ -210,7 +202,6 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 		QThread::msleep(100); // Даем время на отмену
 	}
 
-
 	currentFolder = folderPath;
 	setWindowTitle("Media Browser - " + folderPath);
 		
@@ -238,10 +229,9 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 		previewArea->setPlaceholder(i, "Loading...");
 	}
 
-	// Обновляем статус
-	if (statusBar()) {
-		statusBar()->showMessage(QString("Loading %1 files...").arg(currentFiles.size()));
-	}
+	// Обновляем статус-бар с полной информацией
+	statusLoading = QString("Loading %1 files...").arg(currentFiles.size());
+	updateStatusBar();
 
 	// Запускаем загрузку превью
 	if (thumbnailLoader) {
@@ -255,25 +245,9 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 void MediaBrowser::onSelectionChanged(const QSet<int>& selectedIndices)
 {
 	// Обновляем статус или передаем в панель тегов
-
 	selectedFileIndices = selectedIndices;
-
-	QString message;
-	if (selectedIndices.isEmpty()) {
-		message = "No selection";
-	}
-	else if (selectedIndices.size() == 1) {
-		int index = *selectedIndices.begin();
-		if (index < currentFiles.size()) {
-			message = QString("Selected: %1").arg(currentFiles[index]);
-		}
-	}
-	else {
-		message = QString("%1 items selected").arg(selectedIndices.size());
-	}
-
-	statusBar()->showMessage(message);
-
+		
+	updateStatusBar();
 	updateTagsPanel();
 }
 
@@ -323,13 +297,15 @@ void MediaBrowser::updateTagsPanel()
 
 void MediaBrowser::onThumbnailsFinished()
 {
-	statusBar()->showMessage("Loading finished", 3000);
+	statusLoading = "Loading finished";
+	updateStatusBar();
 }
 
 void MediaBrowser::onThumbnailLoaderError(const QString& error)
 {
 	qDebug() << "ThumbnailLoader error:" << error;
-	statusBar()->showMessage("Error: " + error, 5000);
+	statusLoading = "Error: " + error;
+	updateStatusBar();
 }
 
 // Слоты для PreviewArea
@@ -452,66 +428,7 @@ void MediaBrowser::loadNextUnprocessedFolder()
 	updateTagsPanel();
 }
 
-/*
-void MediaBrowser::moveCurrentFolder()
-{
-	if (currentFolder.isEmpty()) {
-		QMessageBox::warning(this, "Ошибка", "Нет текущей папки для перемещения");
-		return;
-	}
 
-	if (cfg.targetRoot.isEmpty() || !QDir(cfg.targetRoot).exists()) {
-		QMessageBox::warning(this, "Ошибка", "Целевая папка не выбрана или не существует");
-		return;
-	}
-
-	// Получаем имя папки
-	QString folderName = QFileInfo(currentFolder).fileName();
-	QString targetPath = QDir(cfg.targetRoot).absoluteFilePath(folderName);
-
-	// Проверяем, не существует ли уже такая папка
-	if (QDir(targetPath).exists()) {
-		int result = QMessageBox::question(this, "Подтверждение",
-			QString("Папка '%1' уже существует в целевой директории.\nПерезаписать?")
-			.arg(folderName),
-			QMessageBox::Yes | QMessageBox::No);
-
-		if (result == QMessageBox::No) {
-			return;
-		}
-	}
-
-	// Перемещаем папку
-	QDir dir;
-	if (!dir.rename(currentFolder, targetPath)) {
-		QMessageBox::critical(this, "Ошибка",
-			QString("Не удалось переместить папку '%1' в '%2'")
-			.arg(currentFolder).arg(targetPath));
-		return;
-	}
-
-	statusBar()->showMessage(QString("Папка перемещена в %1").arg(targetPath), 5000);
-
-	// Очищаем и загружаем следующую папку
-	previewArea->clearThumbnails();
-	
-
-	// Ищем следующую папку в исходной директории
-	QDir sourceDir(cfg.sourceRoot);
-	QStringList subdirs = sourceDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-
-	if (!subdirs.isEmpty()) {
-		QString nextFolder = QDir(cfg.sourceRoot).absoluteFilePath(subdirs.first());
-		loadFolderThumbnails(nextFolder);
-	}
-	else {
-		currentFolder.clear();
-		QMessageBox::information(this, "Завершено",
-			"Все папки в исходной директории обработаны.");
-	}
-}
-*/
-// Обработчик перемещения
 
 // Переименовываем старый слот и добавляем новый
 void MediaBrowser::onMoveSelectedClicked(const QString& targetCategory)
@@ -606,24 +523,23 @@ void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
 	if (movedCount > 0) {
 		statusBar()->showMessage(QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory), 5000);
 
-		// Обновляем превью
-	//	previewArea->setThumbnailCount(currentFiles.size());
-		// Обновляем теги
-	//	selectedFileIndices.clear();
-	//	updateTagsPanel();
-
-		// ВАЖНО: Не просто обновляем количество превью, а перезагружаем всю папку
-		// Сначала очищаем выбранные файлы
-		selectedFileIndices.clear();
-
-		// Затем перезагружаем текущую папку, чтобы обновить список файлов
-		if (!currentFolder.isEmpty()) {
-			loadFolderThumbnails(currentFolder);
-		}
-
-		// Обновляем теги
-		updateTagsPanel();
+		reloadCurrentFolder();
 	}
+}
+
+void MediaBrowser::reloadCurrentFolder()
+{
+	// ВАЖНО: Не просто обновляем количество превью, а перезагружаем всю папку
+		// Сначала очищаем выбранные файлы
+	selectedFileIndices.clear();
+
+	// Затем перезагружаем текущую папку, чтобы обновить список файлов
+	if (!currentFolder.isEmpty()) {
+		loadFolderThumbnails(currentFolder);
+	}
+
+	// Обновляем теги
+	updateTagsPanel();
 }
 
 // Обновляем старую функцию moveCurrentFolder
@@ -631,6 +547,14 @@ void MediaBrowser::moveCurrentFolder(const QString& targetCategory)
 {
 	if (currentFolder.isEmpty()) {
 		QMessageBox::warning(this, "Error", "No current folder to move");
+		return;
+	}
+
+	// Проверяем, что целевая папка существует
+	QDir targetDir(targetCategory);
+	if (!targetDir.exists()) {
+		QMessageBox::warning(this, "Error",
+			QString("Target folder does not exist:\n%1").arg(targetCategory));
 		return;
 	}
 
@@ -649,7 +573,12 @@ void MediaBrowser::moveCurrentFolder(const QString& targetCategory)
 		}
 
 		// Если перезаписываем, удаляем старую папку
-		QDir(targetPath).removeRecursively();
+		//@ todo заменить!
+		if (!QDir(targetPath).removeRecursively()) {
+			QMessageBox::warning(this, "Error",
+				QString("Failed to remove existing folder:\n%1").arg(targetPath));
+			return;
+		}
 	}
 
 	// Перемещаем папку
@@ -673,41 +602,6 @@ void MediaBrowser::moveCurrentFolder(const QString& targetCategory)
 	}
 }
 
-/*
-void MediaBrowser::onMoveClicked(const QString& targetCategory)
-{
-	if (currentFolder.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No current folder to move");
-		return;
-	}
-
-	// Получаем имя текущей папки
-	QString folderName = QFileInfo(currentFolder).fileName();
-	QString targetPath = QDir(targetCategory).absoluteFilePath(folderName);
-
-	// Проверяем существование
-	if (QDir(targetPath).exists()) {
-		QMessageBox::StandardButton reply = QMessageBox::question(
-			this, "Confirm",
-			QString("Folder '%1' already exists in target location.\nOverwrite?").arg(folderName),
-			QMessageBox::Yes | QMessageBox::No
-		);
-
-		if (reply == QMessageBox::No) return;
-	}
-
-	// Перемещаем папку
-	QDir dir;
-	if (dir.rename(currentFolder, targetPath)) {
-		statusBar()->showMessage(QString("Moved to: %1").arg(targetPath), 5000);
-		loadNextUnprocessedFolder(); // Загружаем следующую папку
-	}
-	else {
-		QMessageBox::warning(this, "Error",
-			QString("Failed to move folder.\nFrom: %1\nTo: %2").arg(currentFolder).arg(targetPath));
-	}
-}
-*/
 // Выбор исходного корня (через меню)
 void MediaBrowser::onSelectSourceRoot()
 {
@@ -794,4 +688,306 @@ void MediaBrowser::updateObjectTags(const QSet<QString>& newTags)
 	tagsPanel->setAllTags(tagManager->getAllTags());
 }
 
+void MediaBrowser::onMoveSelectedToCustomFolder()
+{
+	qDebug() << "Move selected items to custom folder";
 
+	// Проверяем, есть ли выбранные файлы
+	if (selectedFileIndices.isEmpty()) {
+		QMessageBox::warning(this, "Error",
+			"No files selected.\nPlease select files to move.");
+		return;
+	}
+
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder");
+		return;
+	}
+
+	// Диалог выбора папки
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Select Destination Folder",
+		cfg.targetRoot.isEmpty() ? QDir::homePath() : cfg.targetRoot,
+		QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+	);
+
+	if (!folder.isEmpty()) {
+		// Перемещаем выбранные файлы
+		moveSelectedFiles(folder);
+	}
+}
+
+void MediaBrowser::onMoveFolderToCustomFolder()
+{
+	qDebug() << "Move current folder to custom folder";
+
+	// Проверяем, есть ли текущая папка
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error",
+			"No current folder.\nPlease load a folder first.");
+		return;
+	}
+
+	// Диалог выбора папки
+	QString folder = QFileDialog::getExistingDirectory(
+		this,
+		"Select Destination Folder",
+		cfg.targetRoot.isEmpty() ? QDir::homePath() : cfg.targetRoot,
+		QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+	);
+
+	if (!folder.isEmpty()) {
+		// Перемещаем всю папку
+		moveCurrentFolder(folder);
+	}
+}
+
+void MediaBrowser::onDeleteSelectedItems()
+{
+	qDebug() << "Delete selected items";
+
+	// Проверяем, есть ли выбранные файлы
+	if (selectedFileIndices.isEmpty()) {
+		QMessageBox::warning(this, "Error",
+			"No files selected.\nPlease select files to delete.");
+		return;
+	}
+
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder");
+		return;
+	}
+
+	// Получаем имена выбранных файлов
+	QStringList selectedFiles;
+	for (int index : selectedFileIndices) {
+		if (index < currentFiles.size()) {
+			selectedFiles.append(currentFiles[index]);
+		}
+	}
+
+	if (selectedFiles.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No valid files selected");
+		return;
+	}
+
+	// Запрос подтверждения
+	QString message;
+	if (selectedFiles.size() == 1) {
+		message = QString("Are you sure you want to permanently delete the file:\n\n%1")
+			.arg(selectedFiles.first());
+	}
+	else {
+		message = QString("Are you sure you want to permanently delete %1 selected files?")
+			.arg(selectedFiles.size());
+	}
+
+	QMessageBox::StandardButton reply = QMessageBox::question(
+		this,
+		"Confirm Delete",
+		message,
+		QMessageBox::Yes | QMessageBox::No,
+		QMessageBox::No
+	);
+
+	if (reply == QMessageBox::Yes) {
+		// Удаляем файлы
+		deleteFiles(selectedFiles);
+	}
+}
+
+void MediaBrowser::onDeleteCurrentFolder()
+{
+	qDebug() << "Delete current folder";
+
+	// Проверяем, есть ли текущая папка
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error",
+			"No current folder.\nPlease load a folder first.");
+		return;
+	}
+
+	QFileInfo folderInfo(currentFolder);
+	QString folderName = folderInfo.fileName();
+
+	// Получаем количество файлов в папке
+	QDir dir(currentFolder);
+	QStringList allFiles = dir.entryList(QDir::Files);
+	int fileCount = allFiles.size();
+
+	// Запрос подтверждения (более строгий для удаления папки)
+	QString message = QString(
+		"Are you sure you want to permanently delete the folder:\n\n"
+		"%1\n\n"
+		"This folder contains %2 file(s).\n"
+		"This operation CANNOT be undone!"
+	).arg(currentFolder).arg(fileCount);
+
+	QMessageBox::StandardButton reply = QMessageBox::question(
+		this,
+		"Confirm Delete Folder",
+		message,
+		QMessageBox::Yes | QMessageBox::No,
+		QMessageBox::No
+	);
+
+	if (reply == QMessageBox::Yes) {
+		// Дополнительное подтверждение для папок с файлами
+		if (fileCount > 0) {
+			QMessageBox::StandardButton secondReply = QMessageBox::question(
+				this,
+				"Final Confirmation",
+				QString("You are about to delete %1 file(s).\n"
+					"Are you ABSOLUTELY sure?").arg(fileCount),
+				QMessageBox::Yes | QMessageBox::No,
+				QMessageBox::No
+			);
+
+			if (secondReply != QMessageBox::Yes) {
+				return;
+			}
+		}
+
+		// Удаляем папку
+		deleteFolder(currentFolder);
+	}
+}
+
+void MediaBrowser::deleteFiles(const QStringList& filenames)
+{
+	qDebug() << "Deleting files:" << filenames;
+
+	if (filenames.isEmpty()) return;
+
+	int deletedCount = 0;
+	int failedCount = 0;
+	QDir sourceDir(currentFolder);
+
+	for (const QString &filename : filenames) {
+		QString filePath = sourceDir.absoluteFilePath(filename);
+
+		// Удаляем файл
+		if (QFile::remove(filePath)) {
+			deletedCount++;
+
+			// Удаляем .tags файл если он существует
+			QString tagsPath = filePath + ".tags";
+			if (QFile::exists(tagsPath)) {
+				QFile::remove(tagsPath);
+			}
+
+			// Удаляем из текущего списка файлов
+			currentFiles.removeAll(filename);
+
+			qDebug() << "Deleted:" << filename;
+		}
+		else {
+			failedCount++;
+			qDebug() << "Failed to delete:" << filename;
+		}
+	}
+
+	// Обновляем отображение
+	if (deletedCount > 0) {
+		statusBar()->showMessage(
+			QString("Deleted %1 files, %2 failed").arg(deletedCount).arg(failedCount),
+			5000
+		);
+
+		// Очищаем выделение и перезагружаем текущую папку
+		selectedFileIndices.clear();
+		previewArea->clearSelection();
+		reloadCurrentFolder();
+		updateTagsPanel();
+	}
+
+	if (failedCount > 0) {
+		QMessageBox::warning(this, "Delete Failed",
+			QString("Failed to delete %1 file(s).\n"
+				"They may be in use or you don't have permission.")
+			.arg(failedCount));
+	}
+}
+
+void MediaBrowser::deleteFolder(const QString& folderPath)
+{
+	qDebug() << "Deleting folder:" << folderPath;
+
+	QDir dir(folderPath);
+	QString folderName = dir.dirName();
+
+	// Рекурсивно удаляем все содержимое
+	bool success = dir.removeRecursively();
+
+	if (success) {
+		statusBar()->showMessage(QString("Deleted folder: %1").arg(folderPath), 5000);
+
+		// Загружаем следующую папку
+		loadNextUnprocessedFolder();
+	}
+	else {
+		QMessageBox::warning(this, "Delete Failed",
+			QString("Failed to delete folder:\n%1\n\n"
+				"It may be in use, not empty, or you don't have permission.")
+			.arg(folderPath));
+	}
+}
+
+void MediaBrowser::updateStatusBar()
+{
+	if (!statusBar()) return;
+
+	QString statusText;
+
+	// 1. Информация о текущей папке
+	if (!currentFolder.isEmpty()) {
+		
+		// Получаем статистику из кэша
+		int totalFiles = getTotalFilesCount(currentFolder);
+		int totalFolders = getTotalFoldersCount(currentFolder);
+		int mediaFiles = currentFiles.size();
+		int otherFiles = totalFiles - mediaFiles;
+
+		// Формируем строку статистики папки
+		statusText += QString(" %1 files").arg(totalFiles);
+		statusText += QString(", %1 subfolders").arg(totalFolders);
+		statusText += QString(" | %1 media").arg(mediaFiles);
+
+		if (otherFiles > 0) {
+			statusText += QString(", %1 other").arg(otherFiles);
+		}
+	}
+
+	// 2. Информация о выделении
+	if (!selectedFileIndices.isEmpty()) {
+		statusText += QString(" | Selected: %1 files").arg(selectedFileIndices.size());
+	}
+	else {
+		if (!currentFolder.isEmpty()) {
+			statusText += QString(" | No selection");
+		}
+	}
+	
+	if (!statusLoading.isEmpty()) {
+		statusText += " | ";
+		statusText += statusLoading;
+	}
+
+	statusBar()->showMessage(statusText);
+}
+
+// Новые методы для подсчета статистики
+int MediaBrowser::getTotalFilesCount(const QString& folderPath)
+{
+	QDir dir(folderPath);
+	dir.setFilter(QDir::Files | QDir::NoDotAndDotDot);
+	return dir.entryList().count();
+}
+
+int MediaBrowser::getTotalFoldersCount(const QString& folderPath)
+{
+	QDir dir(folderPath);
+	dir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
+	return dir.entryList().count();
+}

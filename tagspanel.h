@@ -24,15 +24,11 @@ public:
 	void setAllTags(const QSet<QString>& allTags);
 	void setObjectName(const QString& name);
 
-	void updateObjectTagsData(const QSet<QString>& objectTags);
-	void updateAllTagsData(const QSet<QString>& allTags);
-
 	// Получение данных
 	QSet<QString> getSelectedTags() const;
 	QString getNewTagText() const;
 
 	// Обновление UI
-
 	void clearInput();
 
 signals:
