@@ -222,11 +222,11 @@ void MediaBrowser::loadFolderThumbnails(const QString& folderPath)
 
 	// Очищаем и настраиваем PreviewArea
 	previewArea->clearThumbnails();
-	previewArea->setThumbnailCount(currentFiles.size());
+	previewArea->setTotalCount(currentFiles.size());
 
 	// Устанавливаем имена файлов в плейсхолдеры
 	for (int i = 0; i < currentFiles.size(); ++i) {
-		previewArea->setPlaceholder(i, "Loading...");
+		previewArea->setFilename(i, currentFiles[i]);
 	}
 
 	// Обновляем статус-бар с полной информацией
@@ -373,9 +373,9 @@ void MediaBrowser::keyPressEvent(QKeyEvent *event)
 
 	// Ctrl+A - выделить все
 	if (event->key() == Qt::Key_A && event->modifiers() == Qt::ControlModifier) {
-		if (previewArea && previewArea->getThumbnailCount() > 0) {
+		if (previewArea && previewArea->getTotalCount() > 0) {
 			QSet<int> allIndices;
-			for (int i = 0; i < previewArea->getThumbnailCount(); ++i) {
+			for (int i = 0; i < previewArea->getTotalCount(); ++i) {
 				allIndices.insert(i);
 			}
 			previewArea->setSelection(allIndices);

@@ -16,22 +16,27 @@ public:
 	explicit PreviewArea(QWidget *parent);
 	~PreviewArea();
 
+	void clearThumbnails();
+
 	// Основные методы
 	void setThumbnailSize(int size);
 	void setColumns(int columns);
-	void setThumbnailCount(int count);
-	void clearThumbnails();
-	void addThumbnail(int index, const QString& filename, const QPixmap& pixmap);
-	void setPlaceholder(int index, const QString& text = "Loading...");
-	void setSelection(const QSet<int>& indices);
-
+	void setTotalCount(int count);
+	
+	// Добавляем новый метод для установки превью
+	void setThumbnail(int index, const QPixmap& pixmap);
+	void setFilename(int index, const QString& filename);
+	
 	// Управление выделением
+	void setSelection(const QSet<int>& indices);
 	void clearSelection();
 	QSet<int> getSelectedIndices() const { return selectedIndices; }
 	QStringList getSelectedFilenames() const;
 
-	// Получение данных
-	int getThumbnailCount() const { return thumbnailWidgets.size(); }
+	// Геттеры
+	int getTotalCount() const { return totalCount; }
+	int getThumbnailSize() const { return thumbnailSize; }
+	int getColumns() const { return columns; }
 
 signals:
 	// Сигналы для внешнего мира
@@ -39,27 +44,51 @@ signals:
 	void thumbnailDoubleClicked(int index);
 	void selectionCleared();
 	void selectionChanged(const QSet<int>& selectedIndices);
+	void visibleRangeChanged(int first, int last);
 
 public slots:
 	void onThumbnailLoaded(int index, const QPixmap& pixmap);
-	void onThumbnailWidgetDoubleClicked(int index);
-	void updateSelection(int index, Qt::KeyboardModifiers modifiers);
+
 protected:
-	bool eventFilter(QObject *obj, QEvent *event) override;
+	void resizeEvent(QResizeEvent *event) override;
+	void scrollContentsBy(int dx, int dy) override; // Важно для виртуализации
+	void mousePressEvent(QMouseEvent *event) override;
+	void mouseDoubleClickEvent(QMouseEvent *event) override;
+
 private:
+	// Виртуальные индексы
+	int totalCount;
+	int firstVisibleIndex;
+	int lastVisibleIndex;
+
+	// Реальные виджеты (только видимые)
+	QMap<int, ThumbnailWidget*> visibleWidgets; // index -> widget
+
+	// Данные для всех элементов
+	QVector<QString> filenames;
+	QMap<int, QPixmap> thumbnailCache; // Кэш для быстрого доступа
+
 	// UI элементы
 	QWidget *container;
 	QGridLayout *layout;
-	QVector<ThumbnailWidget*> thumbnailWidgets;
-	QVector<QString> filenames;
-
+	QTimer *scrollTimer;
+	
 	// Настройки
 	int thumbnailSize;
 	int columns;
+	int spacing;
 
 	// Выделение
 	QSet<int> selectedIndices;
 	int lastSelectedIndex;
+
+	// Вспомогательные методы
+	void createWidgetsForRange(int first, int last);
+	void destroyWidgetsOutsideRange(int first, int last);
+	ThumbnailWidget* getOrCreateWidget(int index);
+	QRect getWidgetGeometry(int index) const;
+	int indexAt(const QPoint& pos) const;	
+	void updateContainerSize();
 
 	// Фоновая подсветка
 	void updateBackgroundStyle();
@@ -67,5 +96,6 @@ private:
 
 private slots:
 	void onThumbnailWidgetClicked(int index, Qt::KeyboardModifiers modifiers);
-	void onContainerClicked();
+	void onThumbnailWidgetDoubleClicked(int index);
+	void updateVisibleRange();
 };

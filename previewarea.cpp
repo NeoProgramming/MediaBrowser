@@ -3,14 +3,21 @@
 #include <QPainter>
 #include <QDebug>
 #include <QGridLayout>
+#include <QTimer>
+#include <QScrollBar>
 
 PreviewArea::PreviewArea(QWidget *parent)
 	: QScrollArea(parent)
+	, totalCount(0)
+	, firstVisibleIndex(-1)
+	, lastVisibleIndex(-1)
 	, thumbnailSize(200)
 	, columns(4)
+	, spacing(10)
 	, lastSelectedIndex(-1)
 	, container(nullptr)
 	, layout(nullptr)
+	, scrollTimer(nullptr)
 {
 	// Настройка области прокрутки
 	setWidgetResizable(true);
@@ -19,9 +26,10 @@ PreviewArea::PreviewArea(QWidget *parent)
 
 	// Создаем контейнер
 	container = new QWidget();
-	layout = new QGridLayout(container);
-	layout->setSpacing(10);
-	layout->setContentsMargins(15, 15, 15, 15);
+	container->setAttribute(Qt::WA_TransparentForMouseEvents); // Важно!
+	layout = new QGridLayout(container);	//?
+	layout->setSpacing(10);//?
+	layout->setContentsMargins(15, 15, 15, 15);//?
 
 	// Делаем контейнер обрабатывающим события
 	container->setMouseTracking(true);
@@ -36,200 +44,274 @@ PreviewArea::PreviewArea(QWidget *parent)
 	);
 		
 	setWidget(container);
+
+	// Устанавливаем политику фокуса для получения событий клавиатуры
+	setFocusPolicy(Qt::StrongFocus);
+
 	updateBackgroundStyle();
+
+	// Таймер для сглаживания скролла
+	scrollTimer = new QTimer(this);
+	scrollTimer->setSingleShot(true);
+	scrollTimer->setInterval(50);
+	connect(scrollTimer, &QTimer::timeout, this, &PreviewArea::updateVisibleRange);
+	connect(verticalScrollBar(), &QScrollBar::valueChanged,
+		[this](int) { scrollTimer->start(); });
 }
 
 PreviewArea::~PreviewArea()
 {
-	// Удаляем eventFilter при разрушении
+	clearThumbnails();
 	if (container) {
 		container->removeEventFilter(this);
 	}
 }
 
-bool PreviewArea::eventFilter(QObject *obj, QEvent *event)
-{
-	// Обработка клика по фону контейнера
-	if (obj == container && event->type() == QEvent::MouseButtonPress)
-	{
-		QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
-
-		if (mouseEvent->button() == Qt::LeftButton)
-		{
-			// Проверяем, не кликнули ли по превьюшке
-			QWidget *child = container->childAt(mouseEvent->pos());
-
-			// Если кликнули не на превьюшке - снимаем выделение
-			if (!child) {
-				clearSelection();
-				return true; // Событие обработано
-			}
-
-			// Проверяем, не является ли child ThumbnailWidget
-			ThumbnailWidget *thumbnail = qobject_cast<ThumbnailWidget*>(child);
-			if (!thumbnail || !thumbnailWidgets.contains(thumbnail)) {
-				clearSelection();
-				return true;
-			}
-		}
-	}
-
-	return QScrollArea::eventFilter(obj, event);
-}
-
 void PreviewArea::setThumbnailSize(int size)
 {
 	thumbnailSize = size;
-	// Пересоздаем все превью с новым размером
-	for (ThumbnailWidget *widget : thumbnailWidgets) {
-		if (widget) {
-			widget->setFixedSize(thumbnailSize + 20, thumbnailSize + 20);
-		}
-	}
+	updateContainerSize();
+	updateVisibleRange();
 }
 
 void PreviewArea::setColumns(int cols)
 {
 	columns = cols;
-	// Перерисовываем layout
-	for (int i = 0; i < thumbnailWidgets.size(); ++i) {
-		int row = i / columns;
-		int col = i % columns;
-		layout->addWidget(thumbnailWidgets[i], row, col, Qt::AlignCenter);
-	}
-	container->adjustSize();
+	updateContainerSize();
+	updateVisibleRange();
+}
+
+void PreviewArea::setTotalCount(int count)
+{
+	totalCount = count;
+	filenames.resize(count);
+	updateContainerSize();
+	updateVisibleRange();
 }
 
 void PreviewArea::clearThumbnails()
 {
-	clearSelection();
-
-	for (ThumbnailWidget *widget : thumbnailWidgets) {
-		if (widget) {
-			layout->removeWidget(widget);
-			delete widget;
-		}
+	// Удаляем все виджеты
+	for (auto widget : visibleWidgets) {
+		widget->deleteLater();
 	}
-	thumbnailWidgets.clear();
+	visibleWidgets.clear();
+	thumbnailCache.clear();
 	filenames.clear();
 	selectedIndices.clear();
-	lastSelectedIndex = -1;
-	if (container)
-		container->adjustSize();
+	totalCount = 0;
+	firstVisibleIndex = -1;
+	lastVisibleIndex = -1;
 }
 
-void PreviewArea::setThumbnailCount(int count)
+
+void PreviewArea::updateVisibleRange()
 {
-	clearThumbnails();
+	if (totalCount == 0) return;
 
-	if (count <= 0) return;
+	QRect visibleRect = viewport()->rect();
+	visibleRect.translate(0, verticalScrollBar()->value());
 
-	filenames.resize(count);
+	int itemHeight = thumbnailSize + spacing;
 
-	for (int i = 0; i < count; ++i) {
-		ThumbnailWidget *widget = new ThumbnailWidget(i, container);
-		widget->setFixedSize(thumbnailSize + 20, thumbnailSize + 20);
-		widget->setText("Loading...");
+	// Более точный расчет видимых строк
+	int firstRow = visibleRect.top() / itemHeight;
+	// Если верхняя граница находится внутри строки, все равно включаем эту строку
+	if (visibleRect.top() % itemHeight != 0 && firstRow > 0) {
+		// Оставляем как есть - строка уже включена делением
+	}
+
+	int lastRow = (visibleRect.bottom() + itemHeight - 1) / itemHeight; // Важно: округление вверх
+	// Корректируем, чтобы не выйти за пределы
+	lastRow = qMin(lastRow, (totalCount - 1) / columns);
+
+	int newFirst = qMax(0, firstRow * columns);
+	int newLast = qMin(totalCount - 1, (lastRow + 1) * columns - 1);
+
+	// Добавляем буферные строки (увеличим до 3 для надежности)
+	int bufferRows = 3;
+	newFirst = qMax(0, newFirst - bufferRows * columns);
+	newLast = qMin(totalCount - 1, newLast + bufferRows * columns);
+
+	// Отладка
+	// qDebug() << "Visible rows:" << firstRow << "-" << lastRow
+	//          << "Indices:" << newFirst << "-" << newLast;
+
+	if (newFirst != firstVisibleIndex || newLast != lastVisibleIndex) {
+		destroyWidgetsOutsideRange(newFirst, newLast);
+		createWidgetsForRange(newFirst, newLast);
+
+		firstVisibleIndex = newFirst;
+		lastVisibleIndex = newLast;
+
+		emit visibleRangeChanged(firstVisibleIndex, lastVisibleIndex);
+	}
+}
+
+void PreviewArea::createWidgetsForRange(int first, int last)
+{
+	for (int i = first; i <= last; ++i) {
+		if (!visibleWidgets.contains(i)) {
+			ThumbnailWidget *widget = new ThumbnailWidget(i, container);
+			widget->setFixedSize(thumbnailSize, thumbnailSize);
+
+			// Устанавливаем данные, если есть
+			if (!filenames[i].isEmpty()) {
+				widget->setText(filenames[i]);
+			}
+
+			if (thumbnailCache.contains(i)) {
+				widget->setPixmap(thumbnailCache[i]);
+			}
+
+			if (selectedIndices.contains(i)) {
+				widget->setSelected(true);
+			}
+
+			// Позиционируем
+			int row = i / columns;
+			int col = i % columns;
+			int x = col * (thumbnailSize + 10) + 5;
+			int y = row * (thumbnailSize + 10) + 5;
+			widget->setGeometry(x, y, thumbnailSize, thumbnailSize);
+
+			// Подключаем сигналы
+			connect(widget, &ThumbnailWidget::clicked,
+				this, &PreviewArea::onThumbnailWidgetClicked);
+			connect(widget, &ThumbnailWidget::doubleClicked,
+				this, &PreviewArea::onThumbnailWidgetDoubleClicked);
+
+			widget->show();
+			visibleWidgets[i] = widget;
+		}
+	}
+}
+
+void PreviewArea::destroyWidgetsOutsideRange(int first, int last)
+{
+	QList<int> toRemove;
+	for (auto it = visibleWidgets.begin(); it != visibleWidgets.end(); ++it) {
+		if (it.key() < first || it.key() > last) {
+			it.value()->deleteLater();
+			toRemove.append(it.key());
+		}
+	}
+
+	for (int index : toRemove) {
+		visibleWidgets.remove(index);
+	}
+}
+
+ThumbnailWidget* PreviewArea::getOrCreateWidget(int index)
+{
+	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+	if (!widget) {
+		widget = new ThumbnailWidget(index, this);
+		widget->setFixedSize(thumbnailSize, thumbnailSize);
 
 		// Подключаем сигналы
 		connect(widget, &ThumbnailWidget::clicked,
 			this, &PreviewArea::onThumbnailWidgetClicked);
 		connect(widget, &ThumbnailWidget::doubleClicked,
 			this, &PreviewArea::onThumbnailWidgetDoubleClicked);
-
-		int row = i / columns;
-		int col = i % columns;
-		layout->addWidget(widget, row, col, Qt::AlignCenter);
-
-		thumbnailWidgets.append(widget);
-		filenames[i] = "";  // Пустое имя пока
 	}
-
-	if (container) {
-		container->adjustSize();
-	}
+	return widget;
 }
 
-void PreviewArea::addThumbnail(int index, const QString& filename, const QPixmap& pixmap)
+QRect PreviewArea::getWidgetGeometry(int index) const
 {
-	// Если нужно создать новый виджет
-	while (index >= thumbnailWidgets.size()) {
-		ThumbnailWidget *widget = new ThumbnailWidget(thumbnailWidgets.size(), container);
-		widget->setFixedSize(thumbnailSize + 20, thumbnailSize + 20);
-		widget->setText("Loading...");
+	int row = index / columns;
+	int col = index % columns;
+	int x = col * (thumbnailSize + spacing) + spacing / 2;
+	int y = row * (thumbnailSize + spacing) + spacing / 2;
+	return QRect(x, y, thumbnailSize, thumbnailSize);
+}
 
-		// Подключаем сигналы
-		connect(widget, &ThumbnailWidget::clicked,
-			this, &PreviewArea::onThumbnailWidgetClicked);
-		connect(widget, &ThumbnailWidget::doubleClicked,
-			this, &PreviewArea::onThumbnailWidgetDoubleClicked);
+void PreviewArea::setThumbnail(int index, const QPixmap& pixmap)
+{
+	if (index < 0 || index >= totalCount) return;
 
-		int row = thumbnailWidgets.size() / columns;
-		int col = thumbnailWidgets.size() % columns;
-		layout->addWidget(widget, row, col, Qt::AlignCenter);
+	// Сохраняем в кэш
+	thumbnailCache[index] = pixmap;
 
-		thumbnailWidgets.append(widget);
-		filenames.append("");
-	}
-
-	// Обновляем виджет
-	if (index < thumbnailWidgets.size()) {
-		ThumbnailWidget *widget = thumbnailWidgets[index];
-		QPixmap scaled = pixmap.scaled(thumbnailSize, thumbnailSize,
-			Qt::KeepAspectRatio, Qt::SmoothTransformation);
-		widget->setPixmap(scaled);
+	// Если виджет существует, обновляем его
+	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+	if (widget) {
+		widget->setPixmap(pixmap);
 		widget->setText("");
-		widget->setToolTip(filename);
-		filenames[index] = filename;
 	}
-
-	container->adjustSize();
 }
 
-void PreviewArea::setPlaceholder(int index, const QString& text)
+void PreviewArea::setFilename(int index, const QString& filename)
 {
-	if (index >= 0 && index < thumbnailWidgets.size()) {
-		ThumbnailWidget *widget = thumbnailWidgets[index];
-		widget->setText(text);
-		widget->setPixmap(QPixmap());
+	if (index < 0 || index >= totalCount) return;
+	filenames[index] = filename;
+	
+	// Если виджет существует, обновляем его текст
+	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+	if (widget && !thumbnailCache.contains(index)) {
+		widget->setText(filename);
 	}
 }
 
-void PreviewArea::onThumbnailLoaded(int index, const QPixmap& pixmap)
+int PreviewArea::indexAt(const QPoint& pos) const
 {
-	if (index >= 0 && index < thumbnailWidgets.size()) {
-		addThumbnail(index, filenames[index], pixmap);
+	QPoint containerPos = container->mapFrom(this, pos);
+
+	for (auto it = visibleWidgets.constBegin(); it != visibleWidgets.constEnd(); ++it) {
+		if (it.value()->geometry().contains(containerPos)) {
+			return it.key();
+		}
+	}
+	return -1;
+}
+
+void PreviewArea::updateContainerSize()
+{
+	if (totalCount == 0) return;
+
+	int rows = (totalCount + columns - 1) / columns;
+	int totalHeight = rows * (thumbnailSize + spacing) + spacing;
+	widget()->setFixedHeight(totalHeight);
+	widget()->setFixedWidth(viewport()->width());
+}
+
+void PreviewArea::mousePressEvent(QMouseEvent *event)
+{
+	int index = indexAt(event->pos());
+	if (index >= 0) {
+		onThumbnailWidgetClicked(index, event->modifiers());
+	}
+	else {
+		clearSelection();
 	}
 }
 
-// PreviewArea.cpp
+void PreviewArea::mouseDoubleClickEvent(QMouseEvent *event)
+{
+	int index = indexAt(event->pos());
+	if (index >= 0) {
+		onThumbnailWidgetDoubleClicked(index);
+	}
+}
+
 void PreviewArea::setSelection(const QSet<int>& indices)
 {
-	// Снимаем старое выделение
+	// Снимаем выделение со старых
 	for (int index : selectedIndices) {
-		if (index >= 0 && index < thumbnailWidgets.size()) {
-			if (ThumbnailWidget* widget = thumbnailWidgets[index]) {
-				widget->setSelected(false);
-			}
-		}
+		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+		if (widget) widget->setSelected(false);
 	}
 
 	// Устанавливаем новое выделение
 	selectedIndices = indices;
-	lastSelectedIndex = -1;
+	lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
 
 	for (int index : selectedIndices) {
-		if (index >= 0 && index < thumbnailWidgets.size()) {
-			if (ThumbnailWidget* widget = thumbnailWidgets[index]) {
-				widget->setSelected(true);
-				if (lastSelectedIndex == -1) {
-					lastSelectedIndex = index;
-				}
-			}
-		}
+		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+		if (widget) widget->setSelected(true);
 	}
 
-	updateBackgroundStyle();
 	emit selectionChanged(selectedIndices);
 }
 
@@ -238,15 +320,12 @@ void PreviewArea::clearSelection()
 	if (selectedIndices.isEmpty()) return;
 
 	for (int index : selectedIndices) {
-		if (index >= 0 && index < thumbnailWidgets.size()) {
-			thumbnailWidgets[index]->setSelected(false);
-		}
+		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
+		if (widget) widget->setSelected(false);
 	}
 
 	selectedIndices.clear();
 	lastSelectedIndex = -1;
-	updateBackgroundStyle();
-	emit selectionCleared();
 	emit selectionChanged(selectedIndices);
 }
 
@@ -261,50 +340,60 @@ QStringList PreviewArea::getSelectedFilenames() const
 	return result;
 }
 
+void PreviewArea::resizeEvent(QResizeEvent *event)
+{
+	QScrollArea::resizeEvent(event);
+	updateContainerSize();
+	updateVisibleRange();
+}
+
+void PreviewArea::scrollContentsBy(int dx, int dy)
+{
+	QScrollArea::scrollContentsBy(dx, dy);
+	// Используем таймер для debounce вместо прямого вызова
+	scrollTimer->start();
+}
+
+void PreviewArea::onThumbnailLoaded(int index, const QPixmap& pixmap)
+{
+	if (index >= 0 && index < totalCount) {
+		setThumbnail(index, pixmap);
+	}
+}
+
 void PreviewArea::onThumbnailWidgetClicked(int index, Qt::KeyboardModifiers modifiers)
 {
-	// Логика выделения (можно вынести в отдельный метод)
+	// Логика выделения
 	if (modifiers == Qt::NoModifier) {
 		clearSelection();
 		selectedIndices.insert(index);
-		thumbnailWidgets[index]->setSelected(true);
 		lastSelectedIndex = index;
 	}
 	else if (modifiers & Qt::ControlModifier) {
 		if (selectedIndices.contains(index)) {
 			selectedIndices.remove(index);
-			thumbnailWidgets[index]->setSelected(false);
 		}
 		else {
 			selectedIndices.insert(index);
-			thumbnailWidgets[index]->setSelected(true);
+			lastSelectedIndex = index;
 		}
-		lastSelectedIndex = index;
 	}
 	else if (modifiers & Qt::ShiftModifier && lastSelectedIndex != -1) {
 		int start = qMin(lastSelectedIndex, index);
 		int end = qMax(lastSelectedIndex, index);
 		for (int i = start; i <= end; ++i) {
-			if (!selectedIndices.contains(i)) {
-				selectedIndices.insert(i);
-				thumbnailWidgets[i]->setSelected(true);
-			}
+			selectedIndices.insert(i);
 		}
 	}
 
-	updateBackgroundStyle();
+	// Обновляем отображение выделения
+	setSelection(selectedIndices);
 	emit thumbnailClicked(index, modifiers);
-	emit selectionChanged(selectedIndices);
 }
 
 void PreviewArea::onThumbnailWidgetDoubleClicked(int index)
 {
 	emit thumbnailDoubleClicked(index);
-}
-
-void PreviewArea::onContainerClicked()
-{
-	clearSelection();
 }
 
 void PreviewArea::updateBackgroundStyle()
@@ -319,56 +408,4 @@ void PreviewArea::updateBackgroundStyle()
 		.arg(hasSelection() ? "1px solid #e0e0e0" : "1px dashed #e0e0e0");
 
 	container->setStyleSheet(style);
-}
-
-void PreviewArea::updateSelection(int index, Qt::KeyboardModifiers modifiers)
-{
-	if (index < 0 || index >= thumbnailWidgets.size()) return;
-
-	// Без модификаторов - одиночное выделение
-	if (modifiers == Qt::NoModifier) {
-		clearSelection();
-		selectedIndices.insert(index);
-		thumbnailWidgets[index]->setSelected(true);
-		lastSelectedIndex = index;
-	}
-	// Ctrl - добавить/удалить из выделения
-	else if (modifiers & Qt::ControlModifier) {
-		if (selectedIndices.contains(index)) {
-			selectedIndices.remove(index);
-			thumbnailWidgets[index]->setSelected(false);
-			if (lastSelectedIndex == index) {
-				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
-			}
-		}
-		else {
-			selectedIndices.insert(index);
-			thumbnailWidgets[index]->setSelected(true);
-			lastSelectedIndex = index;
-		}
-	}
-	// Shift - выделить диапазон от lastSelectedIndex до index
-	else if (modifiers & Qt::ShiftModifier && lastSelectedIndex != -1) {
-		int start = qMin(lastSelectedIndex, index);
-		int end = qMax(lastSelectedIndex, index);
-
-		for (int i = start; i <= end; ++i) {
-			if (!selectedIndices.contains(i)) {
-				selectedIndices.insert(i);
-				thumbnailWidgets[i]->setSelected(true);
-			}
-		}
-	}
-	// Alt - исключить из выделения
-	else if (modifiers & Qt::AltModifier) {
-		if (selectedIndices.contains(index)) {
-			selectedIndices.remove(index);
-			thumbnailWidgets[index]->setSelected(false);
-			if (lastSelectedIndex == index) {
-				lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
-			}
-		}
-	}
-
-	updateBackgroundStyle();
 }
