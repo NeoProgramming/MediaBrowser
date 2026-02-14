@@ -66,6 +66,8 @@ private:
 	void initSidebar();
 	void initTagsbar();
 	void initMenu();
+	void initGeometry();
+
 	void moveSelectedFiles(const QString& targetCategory);
 	void moveCurrentFolder(const QString& targetCategory);
 	QString findNextUnprocessedDir();

@@ -37,15 +37,26 @@ MediaBrowser::MediaBrowser(QWidget *parent)
 	initSidebar();
 	initTagsbar();
 	initMenu();
-
-	resize(1200, 800);
-
+	initGeometry();
+	
 	// Загружаем первую папку через таймер (после инициализации UI)
 	QTimer::singleShot(100, this, &MediaBrowser::loadNextUnprocessedFolder);
 }
 
 MediaBrowser::~MediaBrowser()
 {
+	// Сохраняем геометрию перед закрытием
+	cfg.windowGeometry = saveGeometry();
+	cfg.windowState = saveState();
+
+	// Сохраняем ширины панелей
+	if (categoriesPanel) {
+		cfg.leftPanelWidth = categoriesPanel->width();
+	}
+	if (tagsPanel) {
+		cfg.rightPanelWidth = tagsPanel->width();
+	}
+
 	cfg.saveSettings();
 
 	// Останавливаем загрузчик превью
@@ -104,6 +115,7 @@ void MediaBrowser::initSidebar()
 	// Создаем панель категорий
 	categoriesPanel = new CategoriesPanel(this);
 	categoriesPanel->setTargetRoot(cfg.targetRoot);
+
 	addDockWidget(Qt::LeftDockWidgetArea, categoriesPanel);
 
 	// Подключаем сигналы от панели категорий
@@ -117,6 +129,7 @@ void MediaBrowser::initTagsbar()
 {
 	// Создаем панель тегов (справа)
 	tagsPanel = new TagsPanel(this);
+
 	addDockWidget(Qt::RightDockWidgetArea, tagsPanel);
 
 	// Подключаем сигналы от панели тегов
@@ -192,6 +205,31 @@ void MediaBrowser::initMenu()
 			"Center: Current folder previews\n"
 			"Click MOVE to move current folder to selected category");
 	});
+}
+
+void MediaBrowser::initGeometry()
+{
+	// Восстанавливаем геометрию окна
+	if (!cfg.windowGeometry.isEmpty()) {
+		restoreGeometry(cfg.windowGeometry);
+	}
+	else {
+		// Если нет сохраненной геометрии, устанавливаем размер по умолчанию
+		resize(1200, 800);
+	}
+
+	if (!cfg.windowState.isEmpty()) {
+		restoreState(cfg.windowState);
+	}
+
+	// Устанавливаем сохраненные ширины панелей
+	if (categoriesPanel && cfg.leftPanelWidth > 0) {
+		categoriesPanel->resize(cfg.leftPanelWidth, categoriesPanel->height());
+	}
+
+	if (tagsPanel && cfg.rightPanelWidth > 0) {
+		tagsPanel->resize(cfg.rightPanelWidth, tagsPanel->height());
+	}
 }
 
 void MediaBrowser::loadFolderThumbnails(const QString& folderPath)

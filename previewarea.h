@@ -70,7 +70,6 @@ private:
 
 	// UI элементы
 	QWidget *container;
-	QGridLayout *layout;
 	QTimer *scrollTimer;
 	
 	// Настройки

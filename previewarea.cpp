@@ -16,7 +16,6 @@ PreviewArea::PreviewArea(QWidget *parent)
 	, spacing(10)
 	, lastSelectedIndex(-1)
 	, container(nullptr)
-	, layout(nullptr)
 	, scrollTimer(nullptr)
 {
 	// Настройка области прокрутки
@@ -27,10 +26,7 @@ PreviewArea::PreviewArea(QWidget *parent)
 	// Создаем контейнер
 	container = new QWidget();
 	container->setAttribute(Qt::WA_TransparentForMouseEvents); // Важно!
-	layout = new QGridLayout(container);	//?
-	layout->setSpacing(10);//?
-	layout->setContentsMargins(15, 15, 15, 15);//?
-
+	
 	// Делаем контейнер обрабатывающим события
 	container->setMouseTracking(true);
 	container->installEventFilter(this);
