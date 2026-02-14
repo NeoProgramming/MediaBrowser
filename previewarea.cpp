@@ -12,11 +12,11 @@ PreviewArea::PreviewArea(QWidget *parent)
 	, firstVisibleIndex(-1)
 	, lastVisibleIndex(-1)
 	, thumbnailSize(200)
-	, columns(4)
 	, spacing(10)
 	, lastSelectedIndex(-1)
 	, container(nullptr)
 	, scrollTimer(nullptr)
+	, currentColumns(4)
 {
 	// Настройка области прокрутки
 	setWidgetResizable(true);
@@ -66,15 +66,44 @@ PreviewArea::~PreviewArea()
 void PreviewArea::setThumbnailSize(int size)
 {
 	thumbnailSize = size;
+	updateColumns();
 	updateContainerSize();
 	updateVisibleRange();
 }
 
-void PreviewArea::setColumns(int cols)
+void PreviewArea::updateColumns()
 {
-	columns = cols;
-	updateContainerSize();
-	updateVisibleRange();
+	if (!viewport()) return;
+
+	int availableWidth = viewport()->width() - spacing;  // Учитываем отступы
+	if (availableWidth <= 0) return;
+
+	// Рассчитываем максимальное количество колонок
+	int newColumns = availableWidth / (thumbnailSize + spacing);
+	newColumns = qMax(1, newColumns);  // Минимум 1 колонка
+
+	if (newColumns != currentColumns) {
+		
+		currentColumns = newColumns;
+
+		// ВАЖНО: При изменении количества колонок нужно:
+		// 1. Обновить размер контейнера
+		updateContainerSize();
+
+		// 2. Полностью пересоздать видимые виджеты
+		// Очищаем кэш видимых индексов, чтобы принудительно пересоздать все
+		destroyWidgetsOutsideRange(-1, -1);  // Удаляем ВСЕ виджеты
+		firstVisibleIndex = -1;
+		lastVisibleIndex = -1;
+
+		// 3. Заново определить видимый диапазон и создать виджеты
+		updateVisibleRange();
+
+		qDebug() << "Columns changed to:" << currentColumns;
+
+		// Можно добавить сигнал, если нужно оповещать другие компоненты
+		// emit columnsChanged(currentColumns);
+	}
 }
 
 void PreviewArea::setTotalCount(int count)
@@ -119,15 +148,15 @@ void PreviewArea::updateVisibleRange()
 
 	int lastRow = (visibleRect.bottom() + itemHeight - 1) / itemHeight; // Важно: округление вверх
 	// Корректируем, чтобы не выйти за пределы
-	lastRow = qMin(lastRow, (totalCount - 1) / columns);
+	lastRow = qMin(lastRow, (totalCount - 1) / currentColumns);
 
-	int newFirst = qMax(0, firstRow * columns);
-	int newLast = qMin(totalCount - 1, (lastRow + 1) * columns - 1);
+	int newFirst = qMax(0, firstRow * currentColumns);
+	int newLast = qMin(totalCount - 1, (lastRow + 1) * currentColumns - 1);
 
 	// Добавляем буферные строки (увеличим до 3 для надежности)
 	int bufferRows = 3;
-	newFirst = qMax(0, newFirst - bufferRows * columns);
-	newLast = qMin(totalCount - 1, newLast + bufferRows * columns);
+	newFirst = qMax(0, newFirst - bufferRows * currentColumns);
+	newLast = qMin(totalCount - 1, newLast + bufferRows * currentColumns);
 
 	// Отладка
 	// qDebug() << "Visible rows:" << firstRow << "-" << lastRow
@@ -165,8 +194,8 @@ void PreviewArea::createWidgetsForRange(int first, int last)
 			}
 
 			// Позиционируем
-			int row = i / columns;
-			int col = i % columns;
+			int row = i / currentColumns;
+			int col = i % currentColumns;
 			int x = col * (thumbnailSize + 10) + 5;
 			int y = row * (thumbnailSize + 10) + 5;
 			widget->setGeometry(x, y, thumbnailSize, thumbnailSize);
@@ -216,8 +245,8 @@ ThumbnailWidget* PreviewArea::getOrCreateWidget(int index)
 
 QRect PreviewArea::getWidgetGeometry(int index) const
 {
-	int row = index / columns;
-	int col = index % columns;
+	int row = index / currentColumns;
+	int col = index % currentColumns;
 	int x = col * (thumbnailSize + spacing) + spacing / 2;
 	int y = row * (thumbnailSize + spacing) + spacing / 2;
 	return QRect(x, y, thumbnailSize, thumbnailSize);
@@ -266,7 +295,7 @@ void PreviewArea::updateContainerSize()
 {
 	if (totalCount == 0) return;
 
-	int rows = (totalCount + columns - 1) / columns;
+	int rows = (totalCount + currentColumns - 1) / currentColumns;
 	int totalHeight = rows * (thumbnailSize + spacing) + spacing;
 	widget()->setFixedHeight(totalHeight);
 	widget()->setFixedWidth(viewport()->width());
@@ -339,6 +368,7 @@ QStringList PreviewArea::getSelectedFilenames() const
 void PreviewArea::resizeEvent(QResizeEvent *event)
 {
 	QScrollArea::resizeEvent(event);
+	updateColumns();
 	updateContainerSize();
 	updateVisibleRange();
 }

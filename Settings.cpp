@@ -9,7 +9,6 @@ static const char INI_FILE[] = "mediabrowser.ini";
 	X(sourceRoot,		"source", ".")	\
 	X(targetRoot,		"target", ".")	\
 	X(thumbnailSize,	"size",   "200")\
-	X(thumbnailColumns,	"columns","4")\
 	X(windowGeometry,	"win_geometry", QVariant())\
 	X(windowState,		"win_state", QVariant())\
 	X(leftPanelWidth,	"cats_width", Settings::DEFAULT_LEFT_PANEL_WIDTH)\

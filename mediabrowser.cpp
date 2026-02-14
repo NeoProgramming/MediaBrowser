@@ -76,7 +76,6 @@ void MediaBrowser::initPreviewArea()
 	// Создаем область превью
 	previewArea = new PreviewArea(this);
 	previewArea->setThumbnailSize(cfg.thumbnailSize);
-	previewArea->setColumns(cfg.thumbnailColumns);
 
 	// Устанавливаем как центральный виджет
 	setCentralWidget(previewArea);

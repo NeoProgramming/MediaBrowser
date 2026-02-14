@@ -20,7 +20,6 @@ public:
 
 	// Основные методы
 	void setThumbnailSize(int size);
-	void setColumns(int columns);
 	void setTotalCount(int count);
 	
 	// Добавляем новый метод для установки превью
@@ -36,8 +35,7 @@ public:
 	// Геттеры
 	int getTotalCount() const { return totalCount; }
 	int getThumbnailSize() const { return thumbnailSize; }
-	int getColumns() const { return columns; }
-
+	
 signals:
 	// Сигналы для внешнего мира
 	void thumbnailClicked(int index, Qt::KeyboardModifiers modifiers);
@@ -73,8 +71,8 @@ private:
 	QTimer *scrollTimer;
 	
 	// Настройки
+	int currentColumns;
 	int thumbnailSize;
-	int columns;
 	int spacing;
 
 	// Выделение
@@ -88,6 +86,7 @@ private:
 	QRect getWidgetGeometry(int index) const;
 	int indexAt(const QPoint& pos) const;	
 	void updateContainerSize();
+	void updateColumns();
 
 	// Фоновая подсветка
 	void updateBackgroundStyle();
