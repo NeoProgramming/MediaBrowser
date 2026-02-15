@@ -70,24 +70,24 @@ private:
 	void initGeometry();
 
 	void moveSelectedFiles(const QString& targetCategory, const SelectedFilesInfo& selectedInfo);
-	void moveCurrentFolder(const QString& targetCategory);
+	void deleteSelectedFiles(const SelectedFilesInfo& selectedInfo);
+	void moveCurrentFolder(const QString& targetCategory);	
+	void deleteFolder(const QString& folderPath);
+
 	QString findNextUnprocessedDir();
 	void loadNextUnprocessedFolder();
 	void loadFolderThumbnails(const QString& folderPath);
 	void openFile(int index);
 	void updateTagsPanel();
 	void updateObjectTags(const QSet<QString>& newTags);
-	void deleteSelectedFiles(const SelectedFilesInfo& selectedInfo);
-	void deleteFolder(const QString& folderPath);
+	
 	void reloadCurrentFolder();
 	void updateStatusBar();
 	int getTotalFilesCount(const QString& folderPath);
 	int getTotalFoldersCount(const QString& folderPath);
 
 	SelectedFilesInfo getSelectedFilesInfo() const;
-
-	FileOperationResult processSelectedFiles(const std::function<bool(const QString&)>& operation,
-		const QString& operationName);
+		
 	// Обновление интерфейса после успешных файловых операций
 	void updateAfterFileOperation(const QList<int>& successfullyProcessedIndices,
 		const QString& successMessage,

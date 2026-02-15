@@ -10,12 +10,4 @@ struct SelectedFilesInfo {
 	int size() const { return filenames.size(); }
 };
 
-// Новые вспомогательные методы
-struct FileOperationResult {
-	int successCount = 0;
-	int failCount = 0;
-	QList<int> processedIndices;
-	QStringList processedFilenames;
-};
-
 

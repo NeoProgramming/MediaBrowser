@@ -996,47 +996,6 @@ int MediaBrowser::getTotalFoldersCount(const QString& folderPath)
 	return dir.entryList().count();
 }
 
-FileOperationResult MediaBrowser::processSelectedFiles(
-	const std::function<bool(const QString&)>& operation,
-	const QString& operationName)
-{
-	FileOperationResult result;
-
-	if (selectedFileIndices.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No files selected");
-		return result;
-	}
-
-	if (currentFolder.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No current folder");
-		return result;
-	}
-
-	// Получаем пути к выбранным файлам и их индексы
-	QDir sourceDir(currentFolder);
-	QList<int> sortedIndices = selectedFileIndices.values();
-	std::sort(sortedIndices.begin(), sortedIndices.end(), std::greater<int>());
-
-	for (int index : sortedIndices) {
-		if (index < 0 || index >= currentFiles.size()) continue;
-
-		QString filename = currentFiles[index];
-		QString sourcePath = sourceDir.absoluteFilePath(filename);
-
-		if (operation(sourcePath)) {
-			result.successCount++;
-			result.processedIndices.append(index);
-			result.processedFilenames.append(filename);
-		}
-		else {
-			result.failCount++;
-			qDebug() << "Failed to" << operationName << ":" << filename;
-		}
-	}
-
-	return result;
-}
-
 // Обновление интерфейса после успешных файловых операций
 void MediaBrowser::updateAfterFileOperation(const QList<int>& successfullyProcessedIndices,
 	const QString& successMessage,
