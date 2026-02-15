@@ -14,6 +14,7 @@ public:
 	void setSelected(bool selected);
 	bool isSelected() const { return m_selected; }
 	int getIndex() const { return m_index; }
+	void setIndex(int index) { m_index = index; }
 
 signals:
 	void clicked(int index, Qt::KeyboardModifiers modifiers);

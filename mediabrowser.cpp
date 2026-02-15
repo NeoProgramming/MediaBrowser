@@ -349,8 +349,15 @@ void MediaBrowser::onThumbnailLoaderError(const QString& error)
 
 void MediaBrowser::onThumbnailClicked(int index, Qt::KeyboardModifiers modifiers)
 {
-	qDebug() << "Thumbnail clicked:" << index << "modifiers:" << modifiers;
-	// Здесь можно добавить дополнительную логику при клике
+	qDebug() << "MediaBrowser::onThumbnailClicked - index:" << index;
+	qDebug() << "Current files count:" << currentFiles.size();
+
+	if (index >= 0 && index < currentFiles.size()) {
+		qDebug() << "  File at this index:" << currentFiles[index];
+	}
+	else {
+		qDebug() << "  WARNING: Index out of range!";
+	}
 }
 
 void MediaBrowser::onThumbnailDoubleClicked(int index)
@@ -558,9 +565,37 @@ void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
 
 	// Обновляем отображение
 	if (movedCount > 0) {
+		// Получаем индексы перемещенных файлов
+		QList<int> movedIndices = selectedFileIndices.values();//@ .toList();
+
+		// Удаляем из currentFiles
+		QStringList movedFilenames;
+		for (int index : movedIndices) {
+			if (index < currentFiles.size()) {
+				movedFilenames.append(currentFiles[index]);
+			}
+		}
+
+		for (const QString& filename : movedFilenames) {
+			currentFiles.removeAll(filename);
+		}
+
+		// ВАЖНО: Не перезагружаем всё, а просто удаляем из PreviewArea
+		previewArea->removeFiles(movedIndices);
+
+		// Очищаем выделение
+		selectedFileIndices.clear();
+		previewArea->clearSelection();
+
+		// Обновляем статус-бар
+		updateStatusBar();
+
+		// Обновляем теги
+		updateTagsPanel();
+
 		statusBar()->showMessage(QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory), 5000);
 
-		reloadCurrentFolder();
+		//reloadCurrentFolder();
 	}
 }
 
@@ -897,6 +932,15 @@ void MediaBrowser::deleteFiles(const QStringList& filenames)
 
 	if (filenames.isEmpty()) return;
 
+	// Находим индексы удаляемых файлов
+	QList<int> indicesToDelete;
+	for (const QString& filename : filenames) {
+		int index = currentFiles.indexOf(filename);
+		if (index >= 0) {
+			indicesToDelete.append(index);
+		}
+	}
+
 	int deletedCount = 0;
 	int failedCount = 0;
 	QDir sourceDir(currentFolder);
@@ -927,16 +971,35 @@ void MediaBrowser::deleteFiles(const QStringList& filenames)
 
 	// Обновляем отображение
 	if (deletedCount > 0) {
+
+		// Удаляем из currentFiles
+		for (const QString& filename : filenames) {
+			currentFiles.removeAll(filename);
+		}
+
+		// ВАЖНО: Точечное удаление из PreviewArea
+		previewArea->removeFiles(indicesToDelete);
+
+		// Очищаем выделение
+		selectedFileIndices.clear();
+		previewArea->clearSelection();
+
+		// Обновляем статус-бар
+		updateStatusBar();
+
+		// Обновляем теги
+		updateTagsPanel();
+
 		statusBar()->showMessage(
 			QString("Deleted %1 files, %2 failed").arg(deletedCount).arg(failedCount),
 			5000
 		);
 
 		// Очищаем выделение и перезагружаем текущую папку
-		selectedFileIndices.clear();
-		previewArea->clearSelection();
-		reloadCurrentFolder();
-		updateTagsPanel();
+	//	selectedFileIndices.clear();
+	//	previewArea->clearSelection();
+	//	reloadCurrentFolder();
+	//	updateTagsPanel();
 	}
 
 	if (failedCount > 0) {

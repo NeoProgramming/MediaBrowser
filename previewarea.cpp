@@ -25,11 +25,8 @@ PreviewArea::PreviewArea(QWidget *parent)
 
 	// Создаем контейнер
 	container = new QWidget();
-	container->setAttribute(Qt::WA_TransparentForMouseEvents); // Важно!
-	
-	// Делаем контейнер обрабатывающим события
-	container->setMouseTracking(true);
-	container->installEventFilter(this);
+	container->setAttribute(Qt::WA_TransparentForMouseEvents);
+	setWidget(container);
 
 	// Стиль фона
 	container->setStyleSheet(
@@ -38,13 +35,19 @@ PreviewArea::PreviewArea(QWidget *parent)
 		"    border: 1px dashed #e0e0e0;"
 		"}"
 	);
-		
-	setWidget(container);
+
+	// Устанавливаем шаг прокрутки для стрелок
+	QScrollBar* vScrollBar = verticalScrollBar();
+	int rowHeight = thumbnailSize + spacing;
+	vScrollBar->setSingleStep(rowHeight);
+	
+	vScrollBar->update();
 
 	// Устанавливаем политику фокуса для получения событий клавиатуры
-	setFocusPolicy(Qt::StrongFocus);
+//	setFocusPolicy(Qt::StrongFocus);
+	updateBackgroundStyle();	
 
-	updateBackgroundStyle();
+	connect(verticalScrollBar(), &QScrollBar::valueChanged, this, &PreviewArea::updateVisibleRange);
 
 	// Таймер для сглаживания скролла
 	scrollTimer = new QTimer(this);
@@ -58,17 +61,16 @@ PreviewArea::PreviewArea(QWidget *parent)
 PreviewArea::~PreviewArea()
 {
 	clearThumbnails();
-	if (container) {
-		container->removeEventFilter(this);
-	}
 }
 
 void PreviewArea::setThumbnailSize(int size)
 {
 	thumbnailSize = size;
+	updateScrollStep();
 	updateColumns();
 	updateContainerSize();
-	updateVisibleRange();
+	//@ updateVisibleRange();
+	recreateVisibleWidgets();
 }
 
 void PreviewArea::updateColumns()
@@ -82,27 +84,10 @@ void PreviewArea::updateColumns()
 	int newColumns = availableWidth / (thumbnailSize + spacing);
 	newColumns = qMax(1, newColumns);  // Минимум 1 колонка
 
-	if (newColumns != currentColumns) {
-		
+	if (newColumns != currentColumns) {		
 		currentColumns = newColumns;
-
-		// ВАЖНО: При изменении количества колонок нужно:
-		// 1. Обновить размер контейнера
 		updateContainerSize();
-
-		// 2. Полностью пересоздать видимые виджеты
-		// Очищаем кэш видимых индексов, чтобы принудительно пересоздать все
-		destroyWidgetsOutsideRange(-1, -1);  // Удаляем ВСЕ виджеты
-		firstVisibleIndex = -1;
-		lastVisibleIndex = -1;
-
-		// 3. Заново определить видимый диапазон и создать виджеты
-		updateVisibleRange();
-
-		qDebug() << "Columns changed to:" << currentColumns;
-
-		// Можно добавить сигнал, если нужно оповещать другие компоненты
-		// emit columnsChanged(currentColumns);
+		recreateVisibleWidgets();
 	}
 }
 
@@ -110,6 +95,7 @@ void PreviewArea::setTotalCount(int count)
 {
 	totalCount = count;
 	filenames.resize(count);
+	thumbnails.resize(count);
 	updateContainerSize();
 	updateVisibleRange();
 }
@@ -121,7 +107,7 @@ void PreviewArea::clearThumbnails()
 		widget->deleteLater();
 	}
 	visibleWidgets.clear();
-	thumbnailCache.clear();
+	thumbnails.clear();
 	filenames.clear();
 	selectedIndices.clear();
 	totalCount = 0;
@@ -129,109 +115,88 @@ void PreviewArea::clearThumbnails()
 	lastVisibleIndex = -1;
 }
 
-
 void PreviewArea::updateVisibleRange()
 {
-	if (totalCount == 0) return;
+	if (totalCount == 0 || currentColumns == 0)
+		return;
 
-	QRect visibleRect = viewport()->rect();
-	visibleRect.translate(0, verticalScrollBar()->value());
+	int scrollTop = verticalScrollBar()->value();
+	int viewportHeight = viewport()->height();
+	int rowHeight = thumbnailSize + spacing;
 
-	int itemHeight = thumbnailSize + spacing;
+	// 1. ЧИСТЫЕ границы без буфера
+	int firstRow = scrollTop / rowHeight;
+	int lastRow = (scrollTop + viewportHeight) / rowHeight;
 
-	// Более точный расчет видимых строк
-	int firstRow = visibleRect.top() / itemHeight;
-	// Если верхняя граница находится внутри строки, все равно включаем эту строку
-	if (visibleRect.top() % itemHeight != 0 && firstRow > 0) {
-		// Оставляем как есть - строка уже включена делением
-	}
+	// 2. Добавляем небольшой буфер ПОСЛЕ расчёта
+	const int bufferRows = 2;
+	firstRow = qMax(0, firstRow - bufferRows);
 
-	int lastRow = (visibleRect.bottom() + itemHeight - 1) / itemHeight; // Важно: округление вверх
-	// Корректируем, чтобы не выйти за пределы
-	lastRow = qMin(lastRow, (totalCount - 1) / currentColumns);
+	int maxRow = (totalCount - 1) / currentColumns;
+	lastRow = qMin(maxRow, lastRow + bufferRows);
 
-	int newFirst = qMax(0, firstRow * currentColumns);
+	int newFirst = firstRow * currentColumns;
 	int newLast = qMin(totalCount - 1, (lastRow + 1) * currentColumns - 1);
 
-	// Добавляем буферные строки (увеличим до 3 для надежности)
-	int bufferRows = 3;
-	newFirst = qMax(0, newFirst - bufferRows * currentColumns);
-	newLast = qMin(totalCount - 1, newLast + bufferRows * currentColumns);
+	// 3. Если диапазон тот же — выходим
+	if (newFirst == firstVisibleIndex &&
+		newLast == lastVisibleIndex)
+		return;
 
-	// Отладка
-	// qDebug() << "Visible rows:" << firstRow << "-" << lastRow
-	//          << "Indices:" << newFirst << "-" << newLast;
+	// 4. ПОЛНОЕ пересоздание (пока без оптимизаций)
+	qDeleteAll(visibleWidgets);
+	visibleWidgets.clear();
 
-	if (newFirst != firstVisibleIndex || newLast != lastVisibleIndex) {
-		destroyWidgetsOutsideRange(newFirst, newLast);
-		createWidgetsForRange(newFirst, newLast);
+	firstVisibleIndex = newFirst;
+	lastVisibleIndex = newLast;
 
-		firstVisibleIndex = newFirst;
-		lastVisibleIndex = newLast;
+	for (int i = newFirst; i <= newLast; ++i)
+	{
+		ThumbnailWidget* w = createThumbnailWidget(i);
 
-		emit visibleRangeChanged(firstVisibleIndex, lastVisibleIndex);
+		int row = i / currentColumns;
+		int col = i % currentColumns;
+
+		int x = col * rowHeight + spacing / 2;
+		int y = row * rowHeight + spacing / 2;
+
+		w->setGeometry(x, y, thumbnailSize, thumbnailSize);
+		visibleWidgets.append(w);
 	}
+
+	emit visibleRangeChanged(newFirst, newLast);
 }
 
-void PreviewArea::createWidgetsForRange(int first, int last)
+// Вспомогательный метод создания виджета
+ThumbnailWidget* PreviewArea::createThumbnailWidget(int index)
 {
-	for (int i = first; i <= last; ++i) {
-		if (!visibleWidgets.contains(i)) {
-			ThumbnailWidget *widget = new ThumbnailWidget(i, container);
-			widget->setFixedSize(thumbnailSize, thumbnailSize);
+	ThumbnailWidget* widget = new ThumbnailWidget(index, container);
+	widget->setFixedSize(thumbnailSize, thumbnailSize);
 
-			// Устанавливаем данные, если есть
-			if (!filenames[i].isEmpty()) {
-				widget->setText(filenames[i]);
-			}
-
-			if (thumbnailCache.contains(i)) {
-				widget->setPixmap(thumbnailCache[i]);
-			}
-
-			if (selectedIndices.contains(i)) {
-				widget->setSelected(true);
-			}
-
-			// Позиционируем
-			int row = i / currentColumns;
-			int col = i % currentColumns;
-			int x = col * (thumbnailSize + 10) + 5;
-			int y = row * (thumbnailSize + 10) + 5;
-			widget->setGeometry(x, y, thumbnailSize, thumbnailSize);
-
-			// Подключаем сигналы
-			connect(widget, &ThumbnailWidget::clicked,
-				this, &PreviewArea::onThumbnailWidgetClicked);
-			connect(widget, &ThumbnailWidget::doubleClicked,
-				this, &PreviewArea::onThumbnailWidgetDoubleClicked);
-
-			widget->show();
-			visibleWidgets[i] = widget;
-		}
+	if (!thumbnails[index].isNull()) {
+		widget->setPixmap(thumbnails[index]);
+		widget->setText("");
 	}
-}
-
-void PreviewArea::destroyWidgetsOutsideRange(int first, int last)
-{
-	QList<int> toRemove;
-	for (auto it = visibleWidgets.begin(); it != visibleWidgets.end(); ++it) {
-		if (it.key() < first || it.key() > last) {
-			it.value()->deleteLater();
-			toRemove.append(it.key());
-		}
+	else {
+		widget->setText(filenames[index]);
 	}
 
-	for (int index : toRemove) {
-		visibleWidgets.remove(index);
-	}
+	widget->setSelected(selectedIndices.contains(index));
+
+	connect(widget, &ThumbnailWidget::clicked,
+		this, &PreviewArea::onThumbnailWidgetClicked);
+	connect(widget, &ThumbnailWidget::doubleClicked,
+		this, &PreviewArea::onThumbnailWidgetDoubleClicked);
+
+	widget->show();
+	return widget;
 }
 
 ThumbnailWidget* PreviewArea::getOrCreateWidget(int index)
 {
 	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
 	if (!widget) {
-		widget = new ThumbnailWidget(index, this);
+		widget = new ThumbnailWidget(index, container);
 		widget->setFixedSize(thumbnailSize, thumbnailSize);
 
 		// Подключаем сигналы
@@ -257,13 +222,16 @@ void PreviewArea::setThumbnail(int index, const QPixmap& pixmap)
 	if (index < 0 || index >= totalCount) return;
 
 	// Сохраняем в кэш
-	thumbnailCache[index] = pixmap;
+	thumbnails[index] = pixmap;
 
-	// Если виджет существует, обновляем его
-	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
-	if (widget) {
-		widget->setPixmap(pixmap);
-		widget->setText("");
+	// Обновляем виджет, если он видим
+	int offset = index - firstVisibleIndex;
+	if (offset >= 0 && offset < visibleWidgets.size()) {
+		ThumbnailWidget* widget = visibleWidgets[offset];
+		if (widget) {
+			widget->setPixmap(pixmap);
+			widget->setText("");
+		}
 	}
 }
 
@@ -272,10 +240,13 @@ void PreviewArea::setFilename(int index, const QString& filename)
 	if (index < 0 || index >= totalCount) return;
 	filenames[index] = filename;
 	
-	// Если виджет существует, обновляем его текст
-	ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
-	if (widget && !thumbnailCache.contains(index)) {
-		widget->setText(filename);
+	// Обновляем текст в виджете, если он видим
+	int offset = index - firstVisibleIndex;
+	if (offset >= 0 && offset < visibleWidgets.size()) {
+		ThumbnailWidget* widget = visibleWidgets[offset];
+		if (widget && thumbnails[index].isNull()) {
+			widget->setText(filename);
+		}
 	}
 }
 
@@ -283,9 +254,9 @@ int PreviewArea::indexAt(const QPoint& pos) const
 {
 	QPoint containerPos = container->mapFrom(this, pos);
 
-	for (auto it = visibleWidgets.constBegin(); it != visibleWidgets.constEnd(); ++it) {
-		if (it.value()->geometry().contains(containerPos)) {
-			return it.key();
+	for (int i = 0; i < visibleWidgets.size(); ++i) {
+		if (visibleWidgets[i] && visibleWidgets[i]->geometry().contains(containerPos)) {
+			return firstVisibleIndex + i;
 		}
 	}
 	return -1;
@@ -293,12 +264,67 @@ int PreviewArea::indexAt(const QPoint& pos) const
 
 void PreviewArea::updateContainerSize()
 {
-	if (totalCount == 0) return;
+	if (totalCount == 0 || currentColumns == 0) {
+		widget()->setFixedHeight(0);
+		return;
+	}
 
 	int rows = (totalCount + currentColumns - 1) / currentColumns;
 	int totalHeight = rows * (thumbnailSize + spacing) + spacing;
 	widget()->setFixedHeight(totalHeight);
 	widget()->setFixedWidth(viewport()->width());
+}
+
+void PreviewArea::recreateVisibleWidgets()
+{
+	// Удаляем старые виджеты
+	for (auto widget : visibleWidgets) {
+		if (widget) delete widget;
+	}
+	visibleWidgets.clear();
+
+	if (totalCount == 0 || firstVisibleIndex < 0) return;
+
+	// Определяем, сколько виджетов нужно создать
+	int viewportHeight = viewport()->height();
+	int rowsVisible = (viewportHeight + thumbnailSize + spacing - 1) / (thumbnailSize + spacing) + 2; // +2 для буфера
+	int widgetsNeeded = rowsVisible * currentColumns;
+
+	// Создаем новые виджеты
+	for (int i = 0; i < widgetsNeeded; ++i) {
+		int fileIndex = firstVisibleIndex + i;
+		if (fileIndex >= totalCount) break;
+
+		ThumbnailWidget* widget = new ThumbnailWidget(fileIndex, container);
+		widget->setFixedSize(thumbnailSize, thumbnailSize);
+
+		// Устанавливаем содержимое
+		if (!thumbnails[fileIndex].isNull()) {
+			widget->setPixmap(thumbnails[fileIndex]);
+			widget->setText("");
+		}
+		else {
+			widget->setText(filenames[fileIndex]);
+		}
+
+		widget->setSelected(selectedIndices.contains(fileIndex));
+
+		// Позиционируем
+		int row = i / currentColumns;
+		int col = i % currentColumns;
+		int x = col * (thumbnailSize + spacing) + spacing / 2;
+		int y = row * (thumbnailSize + spacing) + spacing / 2;
+		widget->setGeometry(x, y, thumbnailSize, thumbnailSize);
+
+		// Подключаем сигналы
+		connect(widget, &ThumbnailWidget::clicked,
+			this, &PreviewArea::onThumbnailWidgetClicked);
+		connect(widget, &ThumbnailWidget::doubleClicked,
+			this, &PreviewArea::onThumbnailWidgetDoubleClicked);
+
+		widget->show();
+		visibleWidgets.append(widget);
+	}
 }
 
 void PreviewArea::mousePressEvent(QMouseEvent *event)
@@ -324,8 +350,12 @@ void PreviewArea::setSelection(const QSet<int>& indices)
 {
 	// Снимаем выделение со старых
 	for (int index : selectedIndices) {
-		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
-		if (widget) widget->setSelected(false);
+		int offset = index - firstVisibleIndex;
+		if (offset >= 0 && offset < visibleWidgets.size()) {
+			if (visibleWidgets[offset]) {
+				visibleWidgets[offset]->setSelected(false);
+			}
+		}
 	}
 
 	// Устанавливаем новое выделение
@@ -333,8 +363,12 @@ void PreviewArea::setSelection(const QSet<int>& indices)
 	lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
 
 	for (int index : selectedIndices) {
-		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
-		if (widget) widget->setSelected(true);
+		int offset = index - firstVisibleIndex;
+		if (offset >= 0 && offset < visibleWidgets.size()) {
+			if (visibleWidgets[offset]) {
+				visibleWidgets[offset]->setSelected(true);
+			}
+		}
 	}
 
 	emit selectionChanged(selectedIndices);
@@ -345,8 +379,12 @@ void PreviewArea::clearSelection()
 	if (selectedIndices.isEmpty()) return;
 
 	for (int index : selectedIndices) {
-		ThumbnailWidget* widget = visibleWidgets.value(index, nullptr);
-		if (widget) widget->setSelected(false);
+		int offset = index - firstVisibleIndex;
+		if (offset >= 0 && offset < visibleWidgets.size()) {
+			if (visibleWidgets[offset]) {
+				visibleWidgets[offset]->setSelected(false);
+			}
+		}
 	}
 
 	selectedIndices.clear();
@@ -368,15 +406,19 @@ QStringList PreviewArea::getSelectedFilenames() const
 void PreviewArea::resizeEvent(QResizeEvent *event)
 {
 	QScrollArea::resizeEvent(event);
+	updateScrollBarRange();
+	updateScrollStep();
 	updateColumns();
 	updateContainerSize();
-	updateVisibleRange();
+	//updateVisibleRange();
+	recreateVisibleWidgets();
 }
 
 void PreviewArea::scrollContentsBy(int dx, int dy)
 {
 	QScrollArea::scrollContentsBy(dx, dy);
-	// Используем таймер для debounce вместо прямого вызова
+	
+	// Таймер оставляем только для отложенной загрузки превью
 	scrollTimer->start();
 }
 
@@ -434,4 +476,127 @@ void PreviewArea::updateBackgroundStyle()
 		.arg(hasSelection() ? "1px solid #e0e0e0" : "1px dashed #e0e0e0");
 
 	container->setStyleSheet(style);
+}
+
+void PreviewArea::removeFiles(const QList<int>& removedIndices)
+{
+	if (removedIndices.isEmpty()) return;
+
+	qDebug() << "PreviewArea::removeFiles" << removedIndices;
+
+	// Сортируем индексы для обработки
+	QList<int> sortedIndices = removedIndices;
+	std::sort(sortedIndices.begin(), sortedIndices.end());
+
+	// 1. Удаляем из массивов (в обратном порядке)
+	for (int i = sortedIndices.size() - 1; i >= 0; --i) {
+		int index = sortedIndices[i];
+		filenames.removeAt(index);
+		thumbnails.removeAt(index);
+	}
+
+	// 2. Обновляем общее количество
+	int oldTotal = totalCount;
+	totalCount = filenames.size();
+	int removedCount = oldTotal - totalCount;
+
+	// 3. Обновляем выделение
+	QSet<int> newSelected;
+	for (int selIndex : selectedIndices) {
+		int newIndex = selIndex;
+		for (int removedIndex : sortedIndices) {
+			if (selIndex > removedIndex) {
+				newIndex--;
+			}
+		}
+		if (newIndex >= 0 && newIndex < totalCount) {
+			newSelected.insert(newIndex);
+		}
+	}
+	selectedIndices = newSelected;
+	lastSelectedIndex = selectedIndices.isEmpty() ? -1 : *selectedIndices.begin();
+
+	// 4. Сдвигаем индексы в видимых виджетах
+	shiftIndicesAfterRemoval(removedCount);
+
+	// 5. Обновляем размер контейнера
+	updateContainerSize();
+
+	// 6. Перестраиваем видимые виджеты
+	recreateVisibleWidgets();
+
+	emit selectionChanged(selectedIndices);
+}
+
+void PreviewArea::removeFile(int index)
+{
+	removeFiles({ index });
+}
+
+void PreviewArea::shiftIndicesAfterRemoval(int removedCount)
+{
+	// Просто сдвигаем firstVisibleIndex
+	firstVisibleIndex -= removedCount;
+	if (firstVisibleIndex < 0) firstVisibleIndex = 0;
+
+	// Обновляем индексы в существующих виджетах
+	for (int i = 0; i < visibleWidgets.size(); ++i) {
+		if (visibleWidgets[i]) {
+			int newIndex = firstVisibleIndex + i;
+			visibleWidgets[i]->setIndex(newIndex);
+
+			// Обновляем содержимое виджета
+			if (newIndex < totalCount) {
+				if (!thumbnails[newIndex].isNull()) {
+					visibleWidgets[i]->setPixmap(thumbnails[newIndex]);
+					visibleWidgets[i]->setText("");
+				}
+				else {
+					visibleWidgets[i]->setText(filenames[newIndex]);
+				}
+				visibleWidgets[i]->setSelected(selectedIndices.contains(newIndex));
+			}
+		}
+	}
+}
+
+void PreviewArea::wheelEvent(QWheelEvent *event)
+{
+	int step = thumbnailSize + spacing;
+	int currentValue = verticalScrollBar()->value();
+	int numSteps = event->angleDelta().y() / 120; // стандартный шаг колесика
+
+	// Прокручиваем на целое количество рядов
+	int newValue = currentValue - numSteps * step;
+	newValue = qBound(0, newValue, verticalScrollBar()->maximum());
+
+	verticalScrollBar()->setValue(newValue);
+	event->accept();
+}
+
+void PreviewArea::updateScrollStep()
+{
+	QScrollBar* vScrollBar = verticalScrollBar();
+	if (!vScrollBar) return;
+
+	int rowHeight = thumbnailSize + spacing;
+	
+	vScrollBar->setSingleStep(rowHeight);
+}
+
+void PreviewArea::updateScrollBarRange()
+{
+	QScrollBar* bar = verticalScrollBar();
+
+	int totalHeight = widget()->height();
+	int viewportHeight = viewport()->height();
+
+	bar->setMinimum(0);
+	bar->setMaximum(qMax(0, totalHeight - viewportHeight));
+
+	// PageStep = ровно высота видимой области
+	bar->setPageStep(viewportHeight);
+
+	// SingleStep = ровно одна строка
+	bar->setSingleStep(thumbnailSize + spacing);
 }

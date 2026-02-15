@@ -21,7 +21,10 @@ public:
 	// Основные методы
 	void setThumbnailSize(int size);
 	void setTotalCount(int count);
-	
+
+	void removeFiles(const QList<int>& indices);
+	void removeFile(int index);
+			
 	// Добавляем новый метод для установки превью
 	void setThumbnail(int index, const QPixmap& pixmap);
 	void setFilename(int index, const QString& filename);
@@ -52,7 +55,7 @@ protected:
 	void scrollContentsBy(int dx, int dy) override; // Важно для виртуализации
 	void mousePressEvent(QMouseEvent *event) override;
 	void mouseDoubleClickEvent(QMouseEvent *event) override;
-
+	void wheelEvent(QWheelEvent *event) override;
 private:
 	// Виртуальные индексы
 	int totalCount;
@@ -60,11 +63,11 @@ private:
 	int lastVisibleIndex;
 
 	// Реальные виджеты (только видимые)
-	QMap<int, ThumbnailWidget*> visibleWidgets; // index -> widget
+	QVector<ThumbnailWidget*> visibleWidgets;  // виджеты в порядке отображения
 
 	// Данные для всех элементов
-	QVector<QString> filenames;
-	QMap<int, QPixmap> thumbnailCache; // Кэш для быстрого доступа
+	QVector<QString> filenames;		// имена всех файлов (индекс -> имя)
+	QVector<QPixmap> thumbnails;    // превью всех файлов (индекс -> картинка)
 
 	// UI элементы
 	QWidget *container;
@@ -80,14 +83,17 @@ private:
 	int lastSelectedIndex;
 
 	// Вспомогательные методы
-	void createWidgetsForRange(int first, int last);
-	void destroyWidgetsOutsideRange(int first, int last);
+private:
+	ThumbnailWidget* createThumbnailWidget(int index);
 	ThumbnailWidget* getOrCreateWidget(int index);
 	QRect getWidgetGeometry(int index) const;
 	int indexAt(const QPoint& pos) const;	
 	void updateContainerSize();
 	void updateColumns();
-
+	void recreateVisibleWidgets();        // полное пересоздание видимых виджетов
+	void shiftIndicesAfterRemoval(int removedCount);  // сдвиг индексов после удаления
+	void updateScrollStep();
+	void updateScrollBarRange();
 	// Фоновая подсветка
 	void updateBackgroundStyle();
 	bool hasSelection() const { return !selectedIndices.isEmpty(); }
