@@ -22,6 +22,7 @@
 #include "categoriespanel.h"
 #include "tagspanel.h"
 #include "tagmanager.h"
+#include "utils.h"
 
 class ThumbnailLoader;
 
@@ -68,7 +69,7 @@ private:
 	void initMenu();
 	void initGeometry();
 
-	void moveSelectedFiles(const QString& targetCategory);
+	void moveSelectedFiles(const QString& targetCategory, const SelectedFilesInfo& selectedInfo);
 	void moveCurrentFolder(const QString& targetCategory);
 	QString findNextUnprocessedDir();
 	void loadNextUnprocessedFolder();
@@ -76,13 +77,23 @@ private:
 	void openFile(int index);
 	void updateTagsPanel();
 	void updateObjectTags(const QSet<QString>& newTags);
-	void deleteFiles(const QStringList& files);
+	void deleteFiles(const SelectedFilesInfo& selectedInfo);
 	void deleteFolder(const QString& folderPath);
 	void reloadCurrentFolder();
 	void updateStatusBar();
 	int getTotalFilesCount(const QString& folderPath);
 	int getTotalFoldersCount(const QString& folderPath);
 
+	SelectedFilesInfo getSelectedFilesInfo() const;
+
+	FileOperationResult processSelectedFiles(const std::function<bool(const QString&)>& operation,
+		const QString& operationName);
+	void updateAfterFileOperation(const FileOperationResult& result,
+		const QString& successMessage);
+	bool confirmFileDeletion(const QStringList& filenames);
+	bool confirmFolderDeletion(const QString& folderPath, int fileCount);
+
+private:
 	// Настройки
 	Settings cfg;
 

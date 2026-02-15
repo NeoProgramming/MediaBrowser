@@ -472,8 +472,6 @@ void MediaBrowser::loadNextUnprocessedFolder()
 	updateTagsPanel();
 }
 
-
-
 // Переименовываем старый слот и добавляем новый
 void MediaBrowser::onMoveSelectedClicked(const QString& targetCategory)
 {
@@ -487,8 +485,17 @@ void MediaBrowser::onMoveSelectedClicked(const QString& targetCategory)
 		return;
 	}
 
+	// Получаем информацию о выделенных файлах через общий метод
+	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
+
+	if (selectedInfo.isEmpty()) {
+		QMessageBox::warning(this, "Error",
+			"No files selected.\nPlease select files to move.");
+		return;
+	}
+
 	// Перемещаем только выбранные файлы
-	moveSelectedFiles(targetCategory);
+	moveSelectedFiles(targetCategory, selectedInfo);
 }
 
 void MediaBrowser::onMoveAllClicked(const QString& targetCategory)
@@ -503,29 +510,32 @@ void MediaBrowser::onMoveAllClicked(const QString& targetCategory)
 }
 
 // Новая функция для перемещения выбранных файлов
-void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
+void MediaBrowser::moveSelectedFiles(const QString& targetCategory, const SelectedFilesInfo& selectedInfo)
 {
 	qDebug() << "Moving selected files to:" << targetCategory;
 
-	// Получаем имена выбранных файлов
-	QStringList selectedFiles;
-	for (int index : selectedFileIndices) {
-		if (index < currentFiles.size()) {
-			selectedFiles.append(currentFiles[index]);
-		}
-	}
-
-	if (selectedFiles.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No valid files selected");
+	if (selectedInfo.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No files selected");
 		return;
 	}
 
-	// Перемещаем каждый файл
-	int movedCount = 0;
-	QDir sourceDir(currentFolder);
+	// Проверяем целевую папку
 	QDir targetDir(targetCategory);
+	if (!targetDir.exists()) {
+		QMessageBox::warning(this, "Error",
+			QString("Target folder does not exist:\n%1").arg(targetCategory));
+		return;
+	}
 
-	for (const QString &filename : selectedFiles) {
+	// Перемещаем файлы
+	int movedCount = 0;
+	int failedCount = 0;
+	QDir sourceDir(currentFolder);
+	QList<int> successfullyMovedIndices;
+
+	for (int i = 0; i < selectedInfo.filenames.size(); ++i) {
+		const QString& filename = selectedInfo.filenames[i];
+		int index = selectedInfo.indices[i];
 		QString sourcePath = sourceDir.absoluteFilePath(filename);
 		QString targetPath = targetDir.absoluteFilePath(filename);
 
@@ -536,16 +546,18 @@ void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
 				QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
 
 			if (result == QMessageBox::No) {
-				continue; // Пропускаем этот файл
+				failedCount++;
+				continue;
 			}
 			else if (result == QMessageBox::Cancel) {
-				break; // Отменяем операцию
+				break;
 			}
 		}
 
 		// Перемещаем файл
 		if (QFile::rename(sourcePath, targetPath)) {
 			movedCount++;
+			successfullyMovedIndices.append(index);
 
 			// Также перемещаем .tags файл если он существует
 			QString tagsSourcePath = sourcePath + ".tags";
@@ -553,49 +565,49 @@ void MediaBrowser::moveSelectedFiles(const QString& targetCategory)
 			if (QFile::exists(tagsSourcePath)) {
 				QFile::rename(tagsSourcePath, tagsTargetPath);
 			}
-
-			// Удаляем из текущего списка файлов
-			currentFiles.removeAll(filename);
 		}
 		else {
+			failedCount++;
 			QMessageBox::warning(this, "Error",
 				QString("Failed to move file:\n%1").arg(filename));
 		}
 	}
 
-	// Обновляем отображение
+	// Обновляем отображение после перемещения
 	if (movedCount > 0) {
-		// Получаем индексы перемещенных файлов
-		QList<int> movedIndices = selectedFileIndices.values();//@ .toList();
+		// Сортируем индексы для удаления (в обратном порядке)
+		std::sort(successfullyMovedIndices.begin(), successfullyMovedIndices.end(), std::greater<int>());
 
 		// Удаляем из currentFiles
-		QStringList movedFilenames;
-		for (int index : movedIndices) {
-			if (index < currentFiles.size()) {
-				movedFilenames.append(currentFiles[index]);
+		for (int index : successfullyMovedIndices) {
+			if (index >= 0 && index < currentFiles.size()) {
+				currentFiles.removeAt(index);
 			}
 		}
 
-		for (const QString& filename : movedFilenames) {
-			currentFiles.removeAll(filename);
-		}
-
-		// ВАЖНО: Не перезагружаем всё, а просто удаляем из PreviewArea
-		previewArea->removeFiles(movedIndices);
+		// Обновляем PreviewArea
+		previewArea->removeFiles(successfullyMovedIndices);
 
 		// Очищаем выделение
 		selectedFileIndices.clear();
 		previewArea->clearSelection();
 
-		// Обновляем статус-бар
+		// Обновляем статус-бар и теги
 		updateStatusBar();
-
-		// Обновляем теги
 		updateTagsPanel();
+	}
 
-		statusBar()->showMessage(QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory), 5000);
+	// Показываем результат
+	QString message = QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory);
+	if (failedCount > 0) {
+		message += QString(", %1 failed").arg(failedCount);
+	}
+	statusBar()->showMessage(message, 5000);
 
-		//reloadCurrentFolder();
+	if (failedCount > 0) {
+		QMessageBox::warning(this, "Partial Failure",
+			QString("Successfully moved: %1\nFailed: %2")
+			.arg(movedCount).arg(failedCount));
 	}
 }
 
@@ -764,8 +776,10 @@ void MediaBrowser::onMoveSelectedToCustomFolder()
 {
 	qDebug() << "Move selected items to custom folder";
 
-	// Проверяем, есть ли выбранные файлы
-	if (selectedFileIndices.isEmpty()) {
+	// Получаем информацию о выделенных файлах через общий метод
+	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
+
+	if (selectedInfo.isEmpty()) {
 		QMessageBox::warning(this, "Error",
 			"No files selected.\nPlease select files to move.");
 		return;
@@ -785,8 +799,8 @@ void MediaBrowser::onMoveSelectedToCustomFolder()
 	);
 
 	if (!folder.isEmpty()) {
-		// Перемещаем выбранные файлы
-		moveSelectedFiles(folder);
+		// Перемещаем выбранные файлы, передавая подготовленную информацию
+		moveSelectedFiles(folder, selectedInfo);
 	}
 }
 
@@ -819,54 +833,22 @@ void MediaBrowser::onDeleteSelectedItems()
 {
 	qDebug() << "Delete selected items";
 
-	// Проверяем, есть ли выбранные файлы
-	if (selectedFileIndices.isEmpty()) {
+	// Получаем информацию о выделенных файлах через общий метод
+	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
+
+	if (selectedInfo.isEmpty()) {
 		QMessageBox::warning(this, "Error",
 			"No files selected.\nPlease select files to delete.");
 		return;
 	}
 
-	if (currentFolder.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No current folder");
-		return;
-	}
-
-	// Получаем имена выбранных файлов
-	QStringList selectedFiles;
-	for (int index : selectedFileIndices) {
-		if (index < currentFiles.size()) {
-			selectedFiles.append(currentFiles[index]);
-		}
-	}
-
-	if (selectedFiles.isEmpty()) {
-		QMessageBox::warning(this, "Error", "No valid files selected");
-		return;
-	}
-
 	// Запрос подтверждения
-	QString message;
-	if (selectedFiles.size() == 1) {
-		message = QString("Are you sure you want to permanently delete the file:\n\n%1")
-			.arg(selectedFiles.first());
-	}
-	else {
-		message = QString("Are you sure you want to permanently delete %1 selected files?")
-			.arg(selectedFiles.size());
+	if (!confirmFileDeletion(selectedInfo.filenames)) {
+		return;
 	}
 
-	QMessageBox::StandardButton reply = QMessageBox::question(
-		this,
-		"Confirm Delete",
-		message,
-		QMessageBox::Yes | QMessageBox::No,
-		QMessageBox::No
-	);
-
-	if (reply == QMessageBox::Yes) {
-		// Удаляем файлы
-		deleteFiles(selectedFiles);
-	}
+	// Удаляем файлы, передавая подготовленную информацию
+	deleteFiles(selectedInfo);
 }
 
 void MediaBrowser::onDeleteCurrentFolder()
@@ -926,40 +908,32 @@ void MediaBrowser::onDeleteCurrentFolder()
 	}
 }
 
-void MediaBrowser::deleteFiles(const QStringList& filenames)
+void MediaBrowser::deleteFiles(const SelectedFilesInfo& selectedInfo)
 {
-	qDebug() << "Deleting files:" << filenames;
+	qDebug() << "Deleting files:" << selectedInfo.filenames;
 
-	if (filenames.isEmpty()) return;
-
-	// Находим индексы удаляемых файлов
-	QList<int> indicesToDelete;
-	for (const QString& filename : filenames) {
-		int index = currentFiles.indexOf(filename);
-		if (index >= 0) {
-			indicesToDelete.append(index);
-		}
-	}
+	if (selectedInfo.isEmpty()) return;
 
 	int deletedCount = 0;
 	int failedCount = 0;
 	QDir sourceDir(currentFolder);
+	QList<int> successfullyDeletedIndices;
 
-	for (const QString &filename : filenames) {
+	for (int i = 0; i < selectedInfo.filenames.size(); ++i) {
+		const QString& filename = selectedInfo.filenames[i];
+		int index = selectedInfo.indices[i];
 		QString filePath = sourceDir.absoluteFilePath(filename);
 
 		// Удаляем файл
 		if (QFile::remove(filePath)) {
 			deletedCount++;
+			successfullyDeletedIndices.append(index);
 
 			// Удаляем .tags файл если он существует
 			QString tagsPath = filePath + ".tags";
 			if (QFile::exists(tagsPath)) {
 				QFile::remove(tagsPath);
 			}
-
-			// Удаляем из текущего списка файлов
-			currentFiles.removeAll(filename);
 
 			qDebug() << "Deleted:" << filename;
 		}
@@ -969,38 +943,33 @@ void MediaBrowser::deleteFiles(const QStringList& filenames)
 		}
 	}
 
-	// Обновляем отображение
+	// Обновляем отображение после удаления
 	if (deletedCount > 0) {
-
-		// Удаляем из currentFiles
-		for (const QString& filename : filenames) {
-			currentFiles.removeAll(filename);
+		// Сортируем индексы для удаления (уже отсортированы по убыванию)
+		for (int index : successfullyDeletedIndices) {
+			if (index >= 0 && index < currentFiles.size()) {
+				currentFiles.removeAt(index);
+			}
 		}
 
-		// ВАЖНО: Точечное удаление из PreviewArea
-		previewArea->removeFiles(indicesToDelete);
+		// Обновляем PreviewArea
+		previewArea->removeFiles(successfullyDeletedIndices);
 
 		// Очищаем выделение
 		selectedFileIndices.clear();
 		previewArea->clearSelection();
 
-		// Обновляем статус-бар
+		// Обновляем статус-бар и теги
 		updateStatusBar();
-
-		// Обновляем теги
 		updateTagsPanel();
-
-		statusBar()->showMessage(
-			QString("Deleted %1 files, %2 failed").arg(deletedCount).arg(failedCount),
-			5000
-		);
-
-		// Очищаем выделение и перезагружаем текущую папку
-	//	selectedFileIndices.clear();
-	//	previewArea->clearSelection();
-	//	reloadCurrentFolder();
-	//	updateTagsPanel();
 	}
+
+	// Показываем результат
+	QString message = QString("Deleted %1 files").arg(deletedCount);
+	if (failedCount > 0) {
+		message += QString(", %1 failed").arg(failedCount);
+	}
+	statusBar()->showMessage(message, 5000);
 
 	if (failedCount > 0) {
 		QMessageBox::warning(this, "Delete Failed",
@@ -1090,4 +1059,169 @@ int MediaBrowser::getTotalFoldersCount(const QString& folderPath)
 	QDir dir(folderPath);
 	dir.setFilter(QDir::Dirs | QDir::NoDotAndDotDot);
 	return dir.entryList().count();
+}
+
+FileOperationResult MediaBrowser::processSelectedFiles(
+	const std::function<bool(const QString&)>& operation,
+	const QString& operationName)
+{
+	FileOperationResult result;
+
+	if (selectedFileIndices.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No files selected");
+		return result;
+	}
+
+	if (currentFolder.isEmpty()) {
+		QMessageBox::warning(this, "Error", "No current folder");
+		return result;
+	}
+
+	// Получаем пути к выбранным файлам и их индексы
+	QDir sourceDir(currentFolder);
+	QList<int> sortedIndices = selectedFileIndices.values();
+	std::sort(sortedIndices.begin(), sortedIndices.end(), std::greater<int>());
+
+	for (int index : sortedIndices) {
+		if (index < 0 || index >= currentFiles.size()) continue;
+
+		QString filename = currentFiles[index];
+		QString sourcePath = sourceDir.absoluteFilePath(filename);
+
+		if (operation(sourcePath)) {
+			result.successCount++;
+			result.processedIndices.append(index);
+			result.processedFilenames.append(filename);
+		}
+		else {
+			result.failCount++;
+			qDebug() << "Failed to" << operationName << ":" << filename;
+		}
+	}
+
+	return result;
+}
+
+void MediaBrowser::updateAfterFileOperation(const FileOperationResult& result,
+	const QString& successMessage)
+{
+	if (result.successCount == 0) {
+		if (result.failCount > 0) {
+			QMessageBox::warning(this, "Operation Failed",
+				QString("Failed to process %1 file(s)").arg(result.failCount));
+		}
+		return;
+	}
+
+	// Удаляем обработанные файлы из currentFiles (в обратном порядке)
+	QList<int> sortedIndices = result.processedIndices;
+	std::sort(sortedIndices.begin(), sortedIndices.end(), std::greater<int>());
+
+	for (int index : sortedIndices) {
+		if (index >= 0 && index < currentFiles.size()) {
+			currentFiles.removeAt(index);
+		}
+	}
+
+	// Обновляем PreviewArea
+	previewArea->removeFiles(result.processedIndices);
+
+	// Очищаем выделение
+	selectedFileIndices.clear();
+	previewArea->clearSelection();
+
+	// Обновляем статус-бар и теги
+	updateStatusBar();
+	updateTagsPanel();
+
+	// Показываем сообщение об успехе
+	QString message = successMessage.arg(result.successCount);
+	if (result.failCount > 0) {
+		message += QString(", %1 failed").arg(result.failCount);
+	}
+	statusBar()->showMessage(message, 5000);
+
+	if (result.failCount > 0) {
+		QMessageBox::warning(this, "Partial Failure",
+			QString("Successfully processed: %1\nFailed: %2")
+			.arg(result.successCount).arg(result.failCount));
+	}
+}
+
+bool MediaBrowser::confirmFileDeletion(const QStringList& filenames)
+{
+	if (filenames.isEmpty()) return false;
+
+	QString message;
+	if (filenames.size() == 1) {
+		message = QString("Are you sure you want to permanently delete the file:\n\n%1")
+			.arg(filenames.first());
+	}
+	else {
+		message = QString("Are you sure you want to permanently delete %1 selected files?")
+			.arg(filenames.size());
+	}
+
+	QMessageBox::StandardButton reply = QMessageBox::question(
+		this, "Confirm Delete", message,
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No
+	);
+
+	return reply == QMessageBox::Yes;
+}
+
+bool MediaBrowser::confirmFolderDeletion(const QString& folderPath, int fileCount)
+{
+	QFileInfo folderInfo(folderPath);
+	QString folderName = folderInfo.fileName();
+
+	QString message = QString(
+		"Are you sure you want to permanently delete the folder:\n\n"
+		"%1\n\n"
+		"This folder contains %2 file(s).\n"
+		"This operation CANNOT be undone!"
+	).arg(folderPath).arg(fileCount);
+
+	QMessageBox::StandardButton reply = QMessageBox::question(
+		this, "Confirm Delete Folder", message,
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No
+	);
+
+	if (reply != QMessageBox::Yes) return false;
+
+	// Дополнительное подтверждение для папок с файлами
+	if (fileCount > 0) {
+		QMessageBox::StandardButton secondReply = QMessageBox::question(
+			this, "Final Confirmation",
+			QString("You are about to delete %1 file(s).\n"
+				"Are you ABSOLUTELY sure?").arg(fileCount),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::No
+		);
+
+		return secondReply == QMessageBox::Yes;
+	}
+
+	return true;
+}
+
+SelectedFilesInfo MediaBrowser::getSelectedFilesInfo() const
+{
+	SelectedFilesInfo info;
+
+	if (selectedFileIndices.isEmpty() || currentFolder.isEmpty()) {
+		return info;
+	}
+
+	// Получаем индексы и сортируем по убыванию (для последующего удаления)
+	info.indices = selectedFileIndices.values();
+	std::sort(info.indices.begin(), info.indices.end(), std::greater<int>());
+
+	// Получаем имена файлов в порядке сортировки индексов
+	for (int index : info.indices) {
+		if (index >= 0 && index < currentFiles.size()) {
+			info.filenames.append(currentFiles[index]);
+		}
+	}
+
+	return info;
 }

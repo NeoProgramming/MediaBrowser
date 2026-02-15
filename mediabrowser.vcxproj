@@ -107,6 +107,7 @@
     <QtMoc Include="ThumbnailLoader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="utils.h" />
     <QtMoc Include="tagmanager.h" />
     <QtMoc Include="tagspanel.h" />
     <QtMoc Include="categoriespanel.h" />

@@ -52,7 +52,7 @@ public slots:
 
 protected:
 	void resizeEvent(QResizeEvent *event) override;
-	void scrollContentsBy(int dx, int dy) override; // Важно для виртуализации
+	void scrollContentsBy(int dx, int dy) override;
 	void mousePressEvent(QMouseEvent *event) override;
 	void mouseDoubleClickEvent(QMouseEvent *event) override;
 	void wheelEvent(QWheelEvent *event) override;
@@ -85,7 +85,7 @@ private:
 	// Вспомогательные методы
 private:
 	ThumbnailWidget* createThumbnailWidget(int index);
-	ThumbnailWidget* getOrCreateWidget(int index);
+
 	QRect getWidgetGeometry(int index) const;
 	int indexAt(const QPoint& pos) const;	
 	void updateContainerSize();

@@ -3,7 +3,7 @@
 
 ThumbnailWidget::ThumbnailWidget(int index, QWidget *parent)
 	: QLabel(parent)
-	, m_index(index)
+//	, m_index(index)
 	, m_selected(false)
 {
 	setAlignment(Qt::AlignCenter);
