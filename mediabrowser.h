@@ -77,7 +77,7 @@ private:
 	void openFile(int index);
 	void updateTagsPanel();
 	void updateObjectTags(const QSet<QString>& newTags);
-	void deleteFiles(const SelectedFilesInfo& selectedInfo);
+	void deleteSelectedFiles(const SelectedFilesInfo& selectedInfo);
 	void deleteFolder(const QString& folderPath);
 	void reloadCurrentFolder();
 	void updateStatusBar();
@@ -88,8 +88,12 @@ private:
 
 	FileOperationResult processSelectedFiles(const std::function<bool(const QString&)>& operation,
 		const QString& operationName);
-	void updateAfterFileOperation(const FileOperationResult& result,
-		const QString& successMessage);
+	// Обновление интерфейса после успешных файловых операций
+	void updateAfterFileOperation(const QList<int>& successfullyProcessedIndices,
+		const QString& successMessage,
+		int successCount,
+		int failCount = 0);
+	bool checkSelectedFiles() const;
 	bool confirmFileDeletion(const QStringList& filenames);
 	bool confirmFolderDeletion(const QString& folderPath, int fileCount);
 

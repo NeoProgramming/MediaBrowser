@@ -485,14 +485,11 @@ void MediaBrowser::onMoveSelectedClicked(const QString& targetCategory)
 		return;
 	}
 
+	if (!checkSelectedFiles())
+		return;
+
 	// Получаем информацию о выделенных файлах через общий метод
 	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
-
-	if (selectedInfo.isEmpty()) {
-		QMessageBox::warning(this, "Error",
-			"No files selected.\nPlease select files to move.");
-		return;
-	}
 
 	// Перемещаем только выбранные файлы
 	moveSelectedFiles(targetCategory, selectedInfo);
@@ -574,41 +571,54 @@ void MediaBrowser::moveSelectedFiles(const QString& targetCategory, const Select
 	}
 
 	// Обновляем отображение после перемещения
-	if (movedCount > 0) {
-		// Сортируем индексы для удаления (в обратном порядке)
-		std::sort(successfullyMovedIndices.begin(), successfullyMovedIndices.end(), std::greater<int>());
+	// Обновление GUI через общую функцию
+	updateAfterFileOperation(successfullyMovedIndices,
+		QString("Moved %1 files to %2").arg("%1").arg(targetCategory),
+		movedCount,
+		failedCount);
+}
 
-		// Удаляем из currentFiles
-		for (int index : successfullyMovedIndices) {
-			if (index >= 0 && index < currentFiles.size()) {
-				currentFiles.removeAt(index);
+void MediaBrowser::deleteSelectedFiles(const SelectedFilesInfo& selectedInfo)
+{
+	qDebug() << "Deleting files:" << selectedInfo.filenames;
+
+	if (selectedInfo.isEmpty()) return;
+
+	int deletedCount = 0;
+	int failedCount = 0;
+	QDir sourceDir(currentFolder);
+	QList<int> successfullyDeletedIndices;
+
+	for (int i = 0; i < selectedInfo.filenames.size(); ++i) {
+		const QString& filename = selectedInfo.filenames[i];
+		int index = selectedInfo.indices[i];
+		QString filePath = sourceDir.absoluteFilePath(filename);
+
+		// Удаляем файл
+		if (QFile::remove(filePath)) {
+			deletedCount++;
+			successfullyDeletedIndices.append(index);
+
+			// Удаляем .tags файл если он существует
+			QString tagsPath = filePath + ".tags";
+			if (QFile::exists(tagsPath)) {
+				QFile::remove(tagsPath);
 			}
+
+			qDebug() << "Deleted:" << filename;
 		}
-
-		// Обновляем PreviewArea
-		previewArea->removeFiles(successfullyMovedIndices);
-
-		// Очищаем выделение
-		selectedFileIndices.clear();
-		previewArea->clearSelection();
-
-		// Обновляем статус-бар и теги
-		updateStatusBar();
-		updateTagsPanel();
+		else {
+			failedCount++;
+			qDebug() << "Failed to delete:" << filename;
+		}
 	}
 
-	// Показываем результат
-	QString message = QString("Moved %1 files to %2").arg(movedCount).arg(targetCategory);
-	if (failedCount > 0) {
-		message += QString(", %1 failed").arg(failedCount);
-	}
-	statusBar()->showMessage(message, 5000);
-
-	if (failedCount > 0) {
-		QMessageBox::warning(this, "Partial Failure",
-			QString("Successfully moved: %1\nFailed: %2")
-			.arg(movedCount).arg(failedCount));
-	}
+	// Обновляем отображение после удаления
+	// Обновление GUI через общую функцию
+	updateAfterFileOperation(successfullyDeletedIndices,
+		"Deleted %1 files",
+		deletedCount,
+		failedCount);
 }
 
 void MediaBrowser::reloadCurrentFolder()
@@ -776,19 +786,16 @@ void MediaBrowser::onMoveSelectedToCustomFolder()
 {
 	qDebug() << "Move selected items to custom folder";
 
-	// Получаем информацию о выделенных файлах через общий метод
-	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
-
-	if (selectedInfo.isEmpty()) {
-		QMessageBox::warning(this, "Error",
-			"No files selected.\nPlease select files to move.");
+	if (!checkSelectedFiles())
 		return;
-	}
 
 	if (currentFolder.isEmpty()) {
 		QMessageBox::warning(this, "Error", "No current folder");
 		return;
 	}
+
+	// Получаем информацию о выделенных файлах через общий метод
+	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
 
 	// Диалог выбора папки
 	QString folder = QFileDialog::getExistingDirectory(
@@ -833,14 +840,11 @@ void MediaBrowser::onDeleteSelectedItems()
 {
 	qDebug() << "Delete selected items";
 
+	if (!checkSelectedFiles())
+		return;
+
 	// Получаем информацию о выделенных файлах через общий метод
 	SelectedFilesInfo selectedInfo = getSelectedFilesInfo();
-
-	if (selectedInfo.isEmpty()) {
-		QMessageBox::warning(this, "Error",
-			"No files selected.\nPlease select files to delete.");
-		return;
-	}
 
 	// Запрос подтверждения
 	if (!confirmFileDeletion(selectedInfo.filenames)) {
@@ -848,7 +852,7 @@ void MediaBrowser::onDeleteSelectedItems()
 	}
 
 	// Удаляем файлы, передавая подготовленную информацию
-	deleteFiles(selectedInfo);
+	deleteSelectedFiles(selectedInfo);
 }
 
 void MediaBrowser::onDeleteCurrentFolder()
@@ -908,76 +912,7 @@ void MediaBrowser::onDeleteCurrentFolder()
 	}
 }
 
-void MediaBrowser::deleteFiles(const SelectedFilesInfo& selectedInfo)
-{
-	qDebug() << "Deleting files:" << selectedInfo.filenames;
 
-	if (selectedInfo.isEmpty()) return;
-
-	int deletedCount = 0;
-	int failedCount = 0;
-	QDir sourceDir(currentFolder);
-	QList<int> successfullyDeletedIndices;
-
-	for (int i = 0; i < selectedInfo.filenames.size(); ++i) {
-		const QString& filename = selectedInfo.filenames[i];
-		int index = selectedInfo.indices[i];
-		QString filePath = sourceDir.absoluteFilePath(filename);
-
-		// Удаляем файл
-		if (QFile::remove(filePath)) {
-			deletedCount++;
-			successfullyDeletedIndices.append(index);
-
-			// Удаляем .tags файл если он существует
-			QString tagsPath = filePath + ".tags";
-			if (QFile::exists(tagsPath)) {
-				QFile::remove(tagsPath);
-			}
-
-			qDebug() << "Deleted:" << filename;
-		}
-		else {
-			failedCount++;
-			qDebug() << "Failed to delete:" << filename;
-		}
-	}
-
-	// Обновляем отображение после удаления
-	if (deletedCount > 0) {
-		// Сортируем индексы для удаления (уже отсортированы по убыванию)
-		for (int index : successfullyDeletedIndices) {
-			if (index >= 0 && index < currentFiles.size()) {
-				currentFiles.removeAt(index);
-			}
-		}
-
-		// Обновляем PreviewArea
-		previewArea->removeFiles(successfullyDeletedIndices);
-
-		// Очищаем выделение
-		selectedFileIndices.clear();
-		previewArea->clearSelection();
-
-		// Обновляем статус-бар и теги
-		updateStatusBar();
-		updateTagsPanel();
-	}
-
-	// Показываем результат
-	QString message = QString("Deleted %1 files").arg(deletedCount);
-	if (failedCount > 0) {
-		message += QString(", %1 failed").arg(failedCount);
-	}
-	statusBar()->showMessage(message, 5000);
-
-	if (failedCount > 0) {
-		QMessageBox::warning(this, "Delete Failed",
-			QString("Failed to delete %1 file(s).\n"
-				"They may be in use or you don't have permission.")
-			.arg(failedCount));
-	}
-}
 
 void MediaBrowser::deleteFolder(const QString& folderPath)
 {
@@ -1102,29 +1037,32 @@ FileOperationResult MediaBrowser::processSelectedFiles(
 	return result;
 }
 
-void MediaBrowser::updateAfterFileOperation(const FileOperationResult& result,
-	const QString& successMessage)
+// Обновление интерфейса после успешных файловых операций
+void MediaBrowser::updateAfterFileOperation(const QList<int>& successfullyProcessedIndices,
+	const QString& successMessage,
+	int successCount,
+	int failCount)
 {
-	if (result.successCount == 0) {
-		if (result.failCount > 0) {
+	if (successCount == 0) {
+		if (failCount > 0) {
 			QMessageBox::warning(this, "Operation Failed",
-				QString("Failed to process %1 file(s)").arg(result.failCount));
+				QString("Failed to process %1 file(s)").arg(failCount));
 		}
 		return;
 	}
 
-	// Удаляем обработанные файлы из currentFiles (в обратном порядке)
-	QList<int> sortedIndices = result.processedIndices;
-	std::sort(sortedIndices.begin(), sortedIndices.end(), std::greater<int>());
+	// Индексы уже должны быть отсортированы по убыванию для корректного удаления
+	// (гарантируется методом getSelectedFilesInfo)
 
-	for (int index : sortedIndices) {
+	// Удаляем обработанные файлы из currentFiles
+	for (int index : successfullyProcessedIndices) {
 		if (index >= 0 && index < currentFiles.size()) {
 			currentFiles.removeAt(index);
 		}
 	}
 
 	// Обновляем PreviewArea
-	previewArea->removeFiles(result.processedIndices);
+	previewArea->removeFiles(successfullyProcessedIndices);
 
 	// Очищаем выделение
 	selectedFileIndices.clear();
@@ -1135,17 +1073,26 @@ void MediaBrowser::updateAfterFileOperation(const FileOperationResult& result,
 	updateTagsPanel();
 
 	// Показываем сообщение об успехе
-	QString message = successMessage.arg(result.successCount);
-	if (result.failCount > 0) {
-		message += QString(", %1 failed").arg(result.failCount);
+	QString message = successMessage.arg(successCount);
+	if (failCount > 0) {
+		message += QString(", %1 failed").arg(failCount);
 	}
 	statusBar()->showMessage(message, 5000);
 
-	if (result.failCount > 0) {
+	if (failCount > 0) {
 		QMessageBox::warning(this, "Partial Failure",
 			QString("Successfully processed: %1\nFailed: %2")
-			.arg(result.successCount).arg(result.failCount));
+			.arg(successCount).arg(failCount));
 	}
+}
+
+bool MediaBrowser::checkSelectedFiles() const
+{
+	if (!selectedFileIndices.isEmpty()) {
+		return true;
+	}
+	QMessageBox::warning(const_cast<MediaBrowser*>(this), "Error", "No files selected");
+	return false;
 }
 
 bool MediaBrowser::confirmFileDeletion(const QStringList& filenames)
