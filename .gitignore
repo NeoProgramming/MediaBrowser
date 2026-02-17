@@ -11,3 +11,4 @@ Release
 *.txt
 *.ini
 /.vs/mediabrowser/v15/Browse.VC.opendb
+*.aps

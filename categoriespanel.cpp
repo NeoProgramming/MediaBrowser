@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QMessageBox>
+#include <QInputDialog>
 
 CategoriesPanel::CategoriesPanel(QWidget *parent)
 	: QDockWidget(parent)
@@ -27,7 +28,7 @@ CategoriesPanel::CategoriesPanel(QWidget *parent)
 	m_moveSelectedButton = new QPushButton("Move Selected Files");
 	m_moveAllButton = new QPushButton("Move All Folder");
 	m_categoryTree = new QTreeView();
-	m_newCategoryButton = new QPushButton("New theme");
+	m_newCategoryButton = new QPushButton("New category");
 
 	// Настраиваем дерево
 	m_categoryTree->setHeaderHidden(true);
@@ -175,6 +176,56 @@ void CategoriesPanel::onNewCategoryClicked()
 		QMessageBox::warning(this, "Error", "Please select target root first");
 		return;
 	}
+
+	// Простое диалоговое окно для ввода имени
+	bool ok;
+	QString newFolderName = QInputDialog::getText(
+		this,
+		"New Category",
+		"Enter category name:",
+		QLineEdit::Normal,
+		"",
+		&ok
+	);
+
+	if (!ok || newFolderName.isEmpty()) {
+		return;
+	}
+
+	// Создаем полный путь
+	QString newPath = QDir(parentPath).absoluteFilePath(newFolderName);
+
+	// Проверяем, не существует ли уже такая папка
+	if (QDir(newPath).exists()) {
+		QMessageBox::warning(this, "Error",
+			QString("Category '%1' already exists").arg(newFolderName));
+		return;
+	}
+
+	// Создаем директорию
+	QDir dir;
+	if (!dir.mkpath(newPath)) {
+		QMessageBox::warning(this, "Error",
+			QString("Failed to create category '%1'").arg(newFolderName));
+		return;
+	}
+
+	// Обновляем дерево
+	refreshTree();
+
+	// Выделяем созданную папку в дереве
+	QModelIndex newIndex = m_categoriesModel->index(newPath);
+	if (newIndex.isValid()) {
+		m_categoryTree->selectionModel()->clearSelection();
+		m_categoryTree->selectionModel()->select(
+			newIndex,
+			QItemSelectionModel::Select | QItemSelectionModel::Rows
+		);
+		m_categoryTree->scrollTo(newIndex);
+	}
+
+	// Обновляем лейблы
+	updateLabels();
 
 	emit newCategoryRequested(parentPath);
 }
